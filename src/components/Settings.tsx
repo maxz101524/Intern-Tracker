@@ -79,7 +79,7 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
     setMessage('Backup restored')
   }
 
-  const totalInRestore = restore?.backup.entries.reduce((sum, entry) => sum + entry.quantity, 0) ?? 0
+  const totalInRestore = restore?.backup.entries.length ?? 0
 
   return (
     <div className="page-content settings-page">
@@ -99,7 +99,7 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
                 <span key={source}>{source}<button type="button" onClick={() => setSources(sources.filter((item) => item !== source))} aria-label={`Remove ${source}`}><X size={14} /></button></span>
               ))}
             </div>
-            <div className="add-source"><input value={newSource} onChange={(event) => setNewSource(event.target.value)} placeholder="Add another source" /><button type="button" className="button secondary" onClick={addSource}><Plus size={16} /> Add</button></div>
+            <div className="add-source"><input aria-label="New application source" value={newSource} onChange={(event) => setNewSource(event.target.value)} placeholder="Add another source" /><button type="button" className="button secondary" onClick={addSource}><Plus size={16} /> Add</button></div>
           </div>
           <button className="button primary align-start">Save preferences</button>
         </form>
@@ -107,11 +107,11 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
         <section className="settings-section">
           <div className="settings-heading"><span className="settings-icon"><Download size={20} /></span><div><h2>Own your data</h2><p>Back up the full app or open your ledger in a spreadsheet.</p></div></div>
           <div className="data-action">
-            <div><strong>Full JSON backup</strong><span>Includes every entry and setting. Use this to restore Paceboard.</span></div>
+            <div><strong>Full JSON backup</strong><span>Includes every application, status event, and setting. Use this to restore Paceboard.</span></div>
             <button type="button" className="button secondary" onClick={exportJson}><Download size={17} /> Download backup</button>
           </div>
           <div className="data-action">
-            <div><strong>Spreadsheet export</strong><span>One row per ledger entry, including aggregate quantities.</span></div>
+            <div><strong>Spreadsheet export</strong><span>One row per role, including current status and full status history.</span></div>
             <button type="button" className="button secondary" onClick={exportCsv}><FileSpreadsheet size={17} /> Export CSV</button>
           </div>
           <div className="data-action">
@@ -127,7 +127,7 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
           <section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="restore-title">
             <span className="warning-icon"><AlertTriangle /></span>
             <h2 id="restore-title">Replace current data?</h2>
-            <p>The backup contains <strong>{totalInRestore} applications</strong> across {restore.backup.entries.length} ledger entries. Restoring replaces this browser’s current entries and settings.</p>
+            <p>The backup contains <strong>{totalInRestore} applications</strong>, including their status histories. Restoring replaces this browser’s current entries and settings.</p>
             <div className="modal-actions"><button type="button" className="button secondary" onClick={() => setRestore(null)}>Cancel</button><button type="button" className="button danger" onClick={confirmRestore}>Replace and restore</button></div>
           </section>
         </div>

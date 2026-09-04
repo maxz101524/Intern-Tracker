@@ -1,69 +1,61 @@
 import { describe, expect, it } from 'vitest'
-import { createEntry, splitBatchEntry } from './entries'
+import { createApplication } from './entries'
 
-describe('entry rules', () => {
-  it('rejects a batch that pretends to describe one named role', () => {
-    expect(() =>
-      createEntry({
-        submittedAt: '2026-09-03T12:00:00.000Z',
-        quantity: 5,
-        type: 'quick',
-        company: 'Acme',
-      }),
-    ).toThrow('Batch entries cannot include role details or outcomes.')
-  })
-
-  it('rejects zero and fractional quantities', () => {
-    expect(() =>
-      createEntry({
-        submittedAt: '2026-09-03T12:00:00.000Z',
-        quantity: 0,
-        type: 'quick',
-      }),
-    ).toThrow('Quantity must be a positive whole number.')
-
-    expect(() =>
-      createEntry({
-        submittedAt: '2026-09-03T12:00:00.000Z',
-        quantity: 1.5,
-        type: 'quick',
-      }),
-    ).toThrow('Quantity must be a positive whole number.')
-  })
-
-  it('splits one detailed application from a batch without changing the total', () => {
-    const batch = createEntry({
-      submittedAt: '2026-09-01T14:00:00.000Z',
-      quantity: 4,
-      type: 'quick',
-      source: 'LinkedIn',
+describe('singular application rules', () => {
+  it('creates one named application with an initial Applied event', () => {
+    const entry = createApplication({
+      company: ' Cigna ',
+      title: ' AI Innovation Intern ',
+      submittedDate: '2026-09-03',
+      effort: 'targeted',
+      source: ' Career fair ',
     })
 
-    const result = splitBatchEntry(batch, {
-      company: 'Acme',
-      title: 'Data Science Intern',
-      type: 'targeted',
+    expect(entry).toMatchObject({
+      company: 'Cigna',
+      title: 'AI Innovation Intern',
+      submittedDate: '2026-09-03',
+      effort: 'targeted',
+      source: 'Career fair',
     })
-
-    expect(result.remainingBatch?.quantity).toBe(3)
-    expect(result.detailedEntry.quantity).toBe(1)
-    expect(result.detailedEntry.company).toBe('Acme')
-    expect(result.detailedEntry.submittedAt).toBe(batch.submittedAt)
-    expect(
-      (result.remainingBatch?.quantity ?? 0) + result.detailedEntry.quantity,
-    ).toBe(4)
+    expect(entry.statusHistory).toEqual([
+      expect.objectContaining({ status: 'applied', date: '2026-09-03' }),
+    ])
   })
 
-  it('removes the batch when its only application is promoted', () => {
-    const single = createEntry({
-      submittedAt: '2026-09-01T14:00:00.000Z',
-      quantity: 1,
-      type: 'quick',
+  it('requires company and role title', () => {
+    expect(() => createApplication({
+      company: ' ', title: 'AI Intern', submittedDate: '2026-09-03', effort: 'quick',
+    })).toThrow('Company is required.')
+
+    expect(() => createApplication({
+      company: 'Verisk', title: '', submittedDate: '2026-09-03', effort: 'quick',
+    })).toThrow('Role title is required.')
+  })
+
+  it('rejects impossible calendar dates and invalid effort values', () => {
+    expect(() => createApplication({
+      company: 'Verisk', title: 'AI Intern', submittedDate: '2026-02-30', effort: 'quick',
+    })).toThrow('Submission date is not valid.')
+
+    expect(() => createApplication({
+      company: 'Verisk', title: 'AI Intern', submittedDate: '2026-09-03', effort: 'high' as 'quick',
+    })).toThrow('Application effort is not valid.')
+  })
+
+  it('preserves identity and status history while cleaning edited details', () => {
+    const original = createApplication({
+      company: 'Verisk', title: 'AI Intern', submittedDate: '2026-09-01', effort: 'quick',
+    })
+    const edited = createApplication({
+      ...original,
+      company: ' Verisk Analytics ',
+      notes: '  Met recruiter  ',
     })
 
-    const result = splitBatchEntry(single, { company: 'Acme' })
-
-    expect(result.remainingBatch).toBeNull()
-    expect(result.detailedEntry.company).toBe('Acme')
+    expect(edited.id).toBe(original.id)
+    expect(edited.statusHistory).toEqual(original.statusHistory)
+    expect(edited.company).toBe('Verisk Analytics')
+    expect(edited.notes).toBe('Met recruiter')
   })
 })

@@ -1,26 +1,40 @@
-export type ApplicationType = 'quick' | 'targeted'
+export type ApplicationEffort = 'quick' | 'targeted'
 
-export type ApplicationOutcome =
-  | 'assessment'
+export type ApplicationStatus =
+  | 'applied'
+  | 'online_assessment'
   | 'recruiter_screen'
   | 'interview'
   | 'offer'
   | 'rejected'
   | 'withdrawn'
 
+export type DisplayStatus = ApplicationStatus | 'no_response'
+
+export interface StatusEvent {
+  id: string
+  status: ApplicationStatus
+  date: string
+}
+
 export interface ApplicationEntry {
   id: string
-  submittedAt: string
-  quantity: number
-  type: ApplicationType
+  company: string
+  title: string
+  submittedDate: string
+  effort: ApplicationEffort
   source?: string
-  company?: string
-  title?: string
   url?: string
   resumeVariant?: string
   notes?: string
-  outcome?: ApplicationOutcome
+  statusHistory: StatusEvent[]
   updatedAt: string
+}
+
+export interface ApplicationInput extends Omit<ApplicationEntry, 'id' | 'updatedAt' | 'statusHistory'> {
+  id?: string
+  updatedAt?: string
+  statusHistory?: StatusEvent[]
 }
 
 export interface AppSettings {
@@ -29,24 +43,8 @@ export interface AppSettings {
   lastBackupAt: string | null
 }
 
-export interface EntryInput extends Omit<ApplicationEntry, 'id' | 'updatedAt'> {
-  id?: string
-  updatedAt?: string
-}
-
-export interface EntryDetails {
-  type?: ApplicationType
-  source?: string
-  company?: string
-  title?: string
-  url?: string
-  resumeVariant?: string
-  notes?: string
-  outcome?: ApplicationOutcome
-}
-
 export interface TrackerBackup {
-  version: 1
+  version: 2
   exportedAt: string
   entries: ApplicationEntry[]
   settings: AppSettings

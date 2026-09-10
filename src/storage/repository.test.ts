@@ -1,6 +1,8 @@
 import Dexie from 'dexie'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApplication } from '../domain/entries'
+import { createGmailCandidate, emptyGmailImportData } from '../domain/gmail'
+import { buildBackup } from '../domain/backup'
 import { TrackerRepository } from './repository'
 
 describe('TrackerRepository v2', () => {
@@ -52,4 +54,106 @@ describe('TrackerRepository v2', () => {
     await expect(repository.restoreFromJson('{"broken":true}')).rejects.toThrow()
     expect(await repository.listEntries()).toEqual([original])
   })
+
+  it('adds Gmail stores in v3 without changing v2 applications or settings', async () => {
+    const existing = createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-09', effort: 'targeted',
+    })
+    await repository.destroy()
+    const old = new Dexie(name)
+    old.version(2).stores({
+      entries: 'id, submittedDate, effort, source, company, updatedAt',
+      settings: 'key',
+    })
+    await old.table('entries').put(existing)
+    await old.table('settings').put({ key: 'app', weeklyTarget: 35, sources: ['Company site'], lastBackupAt: null })
+    old.close()
+
+    repository = new TrackerRepository(name)
+    expect(await repository.listEntries()).toEqual([existing])
+    expect(await repository.listGmailCandidates('pending')).toEqual([])
+    expect(await repository.getGmailSyncState()).toEqual({ key: 'gmail', initialSyncCompleted: false })
+  })
+
+  it('persists Gmail candidates, processed messages, and sync state idempotently', async () => {
+    const candidate = sampleCandidate()
+    await repository.saveGmailCandidate(candidate)
+    await repository.saveGmailCandidate({ ...candidate, title: 'Machine Learning Intern' })
+    await repository.saveProcessedGmailMessage({
+      messageId: candidate.messageId, disposition: 'candidate', processedAt: '2026-09-10T14:00:00.000Z',
+    })
+    await repository.saveGmailSyncState({
+      key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
+      lastSuccessfulSyncAt: '2026-09-10T14:00:00.000Z', initialSyncCompleted: true,
+    })
+
+    expect(await repository.listGmailCandidates('pending')).toEqual([{ ...candidate, title: 'Machine Learning Intern' }])
+    expect(await repository.hasProcessedGmailMessage(candidate.messageId)).toBe(true)
+    expect(await repository.getGmailImportData()).toMatchObject({
+      processedMessages: [{ messageId: candidate.messageId, disposition: 'candidate' }],
+      syncState: { historyId: '500', initialSyncCompleted: true },
+    })
+  })
+
+  it('reviews a Gmail candidate and creates its application atomically', async () => {
+    const candidate = sampleCandidate()
+    const application = createApplication({
+      company: candidate.company, title: candidate.title, submittedDate: candidate.submittedDate,
+      effort: 'quick', origin: { provider: 'gmail', messageId: candidate.messageId },
+    })
+    await repository.saveGmailCandidate(candidate)
+    await repository.saveProcessedGmailMessage({
+      messageId: candidate.messageId, disposition: 'candidate', processedAt: candidate.createdAt,
+    })
+
+    await repository.reviewGmailCandidate({
+      candidate, disposition: 'imported', application, reviewedAt: '2026-09-10T15:00:00.000Z',
+    })
+
+    expect(await repository.listEntries()).toEqual([application])
+    expect(await repository.listGmailCandidates('pending')).toEqual([])
+    expect(await repository.getGmailCandidate(candidate.messageId)).toMatchObject({
+      state: 'imported', reviewedAt: '2026-09-10T15:00:00.000Z',
+    })
+    expect((await repository.listProcessedGmailMessages())[0].disposition).toBe('imported')
+  })
+
+  it('restores Gmail backup data and clears it when restoring version 2', async () => {
+    const candidate = sampleCandidate()
+    const gmail = {
+      candidates: [candidate],
+      processedMessages: [{ messageId: candidate.messageId, disposition: 'candidate' as const, processedAt: candidate.createdAt }],
+      syncState: { key: 'gmail' as const, historyId: '500', initialSyncCompleted: true },
+    }
+    const settings = { weeklyTarget: 35, sources: ['Company site'], lastBackupAt: null }
+    await repository.restoreFromJson(JSON.stringify(buildBackup([], settings, gmail)))
+    expect(await repository.getGmailImportData()).toEqual(gmail)
+
+    await repository.restoreFromJson(JSON.stringify({ version: 2, entries: [], settings, exportedAt: candidate.createdAt }))
+    expect(await repository.getGmailImportData()).toEqual(emptyGmailImportData())
+  })
+
+  it('resets Gmail history without deleting applications or settings', async () => {
+    const application = createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-09', effort: 'quick',
+    })
+    await repository.saveEntry(application)
+    await repository.saveGmailCandidate(sampleCandidate())
+    await repository.saveSettings({ weeklyTarget: 40, sources: ['LinkedIn'], lastBackupAt: null })
+
+    await repository.resetGmailImportHistory()
+
+    expect(await repository.listEntries()).toEqual([application])
+    expect(await repository.getSettings()).toMatchObject({ weeklyTarget: 40 })
+    expect(await repository.getGmailImportData()).toEqual(emptyGmailImportData())
+  })
 })
+
+function sampleCandidate() {
+  return createGmailCandidate({
+    messageId: 'gmail-1', threadId: 'thread-1', receivedAt: '2026-09-10T13:30:00.000Z',
+    submittedDate: '2026-09-10', sender: 'jobs@acme.com', subject: 'Application received',
+    company: 'Acme', title: 'Data Science Intern', confidence: 'high',
+    matchedRule: 'generic-confirmation', createdAt: '2026-09-10T14:00:00.000Z',
+  })
+}

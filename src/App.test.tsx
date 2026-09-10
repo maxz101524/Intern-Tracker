@@ -58,7 +58,7 @@ describe('Paceboard v2 app', () => {
     await user.click(screen.getByRole('button', { name: 'Save application' }))
 
     await waitFor(async () => expect(await repository.listEntries()).toHaveLength(2))
-    expect(screen.queryByRole('dialog', { name: 'Add application' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add application' })).not.toBeInTheDocument())
   })
 
   it('updates status without erasing its earlier history', async () => {

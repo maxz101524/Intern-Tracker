@@ -1,7 +1,7 @@
 # Gmail Review Queue Design
 
 **Date:** 2026-09-10  
-**Status:** Approved in chat; awaiting review of this written specification
+**Status:** Implemented and verified on `codex/gmail-review-queue`
 
 ## Summary
 

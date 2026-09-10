@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, BarChart3, BriefcaseBusiness, Gauge, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react'
+import { AlertTriangle, BarChart3, BriefcaseBusiness, Gauge, Inbox, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react'
 import { Analytics } from './components/Analytics'
 import { ApplicationDrawer } from './components/ApplicationDrawer'
 import { Applications } from './components/Applications'
 import { Onboarding } from './components/Onboarding'
 import { Overview } from './components/Overview'
 import { Settings } from './components/Settings'
+import { GmailReview } from './components/GmailReview'
 import type { ApplicationEntry, AppSettings } from './domain/types'
+import { createGmailApiClient, type GmailApiClient } from './gmail/api'
+import { createGmailAuthClient, type GmailAuthClient } from './gmail/auth'
+import { useGmailImport } from './hooks/useGmailImport'
 import { trackerRepository, type TrackerRepository } from './storage/repository'
 
-interface AppProps { repository?: TrackerRepository }
-type Page = 'overview' | 'applications' | 'analytics' | 'settings'
+interface AppProps {
+  repository?: TrackerRepository
+  gmailAuth?: GmailAuthClient
+  gmailApiFactory?: (getAccessToken: () => string | null) => GmailApiClient
+}
+type Page = 'overview' | 'applications' | 'review' | 'analytics' | 'settings'
 interface ToastState { message: string; undoEntry?: ApplicationEntry }
 
-export function App({ repository = trackerRepository }: AppProps) {
+const defaultGmailAuth = createGmailAuthClient(import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '')
+const defaultGmailApiFactory = (getAccessToken: () => string | null) => createGmailApiClient(getAccessToken)
+
+export function App({
+  repository = trackerRepository,
+  gmailAuth = defaultGmailAuth,
+  gmailApiFactory = defaultGmailApiFactory,
+}: AppProps) {
   const [entries, setEntries] = useState<ApplicationEntry[]>([])
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [page, setPage] = useState<Page>('overview')
@@ -32,7 +47,19 @@ export function App({ repository = trackerRepository }: AppProps) {
     }
   }, [repository])
 
+  const gmail = useGmailImport(repository, gmailAuth, gmailApiFactory, load)
+  const { lastResult: gmailResult, clearLastResult: clearGmailResult } = gmail
+
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (!gmailResult) return
+    setToast({
+      message: gmailResult.newCandidates > 0
+        ? `${gmailResult.newCandidates} Gmail ${gmailResult.newCandidates === 1 ? 'match is' : 'matches are'} ready to review`
+        : 'Gmail is up to date',
+    })
+    clearGmailResult()
+  }, [gmailResult, clearGmailResult])
 
   async function saveSettings(next: AppSettings) {
     await repository.saveSettings(next)
@@ -62,7 +89,7 @@ export function App({ repository = trackerRepository }: AppProps) {
 
   async function restore(raw: string) {
     await repository.restoreFromJson(raw)
-    await load()
+    await Promise.all([load(), gmail.refresh()])
   }
 
   function addApplication() {
@@ -93,6 +120,7 @@ export function App({ repository = trackerRepository }: AppProps) {
         <nav aria-label="Primary navigation">
           <NavButton label="Overview" active={page === 'overview'} icon={<LayoutDashboard size={19} />} onClick={() => setPage('overview')} />
           <NavButton label="Applications" active={page === 'applications'} icon={<BriefcaseBusiness size={19} />} onClick={() => setPage('applications')} />
+          <NavButton label="Review" count={gmail.pendingCandidates.length} active={page === 'review'} icon={<Inbox size={19} />} onClick={() => setPage('review')} />
           <NavButton label="Analytics" active={page === 'analytics'} icon={<BarChart3 size={19} />} onClick={() => setPage('analytics')} />
           <NavButton label="Settings & data" active={page === 'settings'} icon={<SettingsIcon size={19} />} onClick={() => setPage('settings')} />
         </nav>
@@ -104,8 +132,9 @@ export function App({ repository = trackerRepository }: AppProps) {
         {needsBackup && page !== 'settings' && <button type="button" className="backup-warning" onClick={() => setPage('settings')}><AlertTriangle size={16} /><span>Your local data needs a backup.</span><strong>Back up now</strong></button>}
         {page === 'overview' && <Overview entries={entries} settings={settings} onAdd={addApplication} onEdit={editApplication} onOpenApplications={() => setPage('applications')} />}
         {page === 'applications' && <Applications entries={entries} sources={settings.sources} onAdd={addApplication} onEdit={editApplication} />}
+        {page === 'review' && <GmailReview candidates={gmail.pendingCandidates} entries={entries} onAccept={gmail.acceptCandidate} onDismiss={gmail.dismissCandidate} />}
         {page === 'analytics' && <Analytics entries={entries} />}
-        {page === 'settings' && <Settings entries={entries} settings={settings} onSave={saveSettings} onRestore={restore} />}
+        {page === 'settings' && <Settings entries={entries} settings={settings} gmail={gmail} onSave={saveSettings} onRestore={restore} />}
       </main>
 
       {drawerOpen && <ApplicationDrawer key={drawerEntry?.id ?? 'new'} entry={drawerEntry} sources={settings.sources} onClose={closeDrawer} onSave={saveEntry} onDelete={deleteEntry} />}
@@ -114,6 +143,7 @@ export function App({ repository = trackerRepository }: AppProps) {
   )
 }
 
-function NavButton({ label, active, icon, onClick }: { label: string; active: boolean; icon: React.ReactNode; onClick: () => void }) {
-  return <button type="button" className={active ? 'active' : ''} onClick={onClick} aria-label={label}>{icon}<span>{label}</span></button>
+function NavButton({ label, count, active, icon, onClick }: { label: string; count?: number; active: boolean; icon: React.ReactNode; onClick: () => void }) {
+  const accessibleLabel = count === undefined ? label : `${label}, ${count} pending`
+  return <button type="button" className={active ? 'active' : ''} onClick={onClick} aria-label={accessibleLabel}>{icon}<span>{label}</span>{count !== undefined && <span className="nav-count" aria-hidden="true">{count}</span>}</button>
 }

@@ -1,8 +1,12 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { createApplication } from './domain/entries'
+import { createGmailCandidate } from './domain/gmail'
+import type { GmailApiClient } from './gmail/api'
+import type { GmailAuthClient, GmailAuthState, GmailAuthStatus } from './gmail/auth'
+import type { GmailApiMessage } from './gmail/types'
 import { TrackerRepository } from './storage/repository'
 
 describe('Paceboard v2 app', () => {
@@ -110,6 +114,102 @@ describe('Paceboard v2 app', () => {
     expect(screen.queryByRole('dialog', { name: 'Add application' })).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
   })
+
+  it('reviews a Gmail candidate as Quick by default and accepts edited details', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const candidate = createGmailCandidate({
+      messageId: 'gmail-1', threadId: 'thread-1', receivedAt: '2026-09-10T13:30:00.000Z',
+      submittedDate: '2026-09-10', sender: 'Acme Recruiting <jobs@acme.com>',
+      subject: 'Application received', company: 'Acme', title: 'Data Intern', confidence: 'high',
+      matchedRule: 'generic-confirmation', createdAt: '2026-09-10T14:00:00.000Z',
+    })
+    await repository.saveGmailCandidate(candidate)
+    render(<App repository={repository} />)
+
+    const reviewNav = await screen.findByRole('button', { name: 'Review, 1 pending' })
+    await user.click(reviewNav)
+    expect(screen.getByRole('heading', { name: 'Review Gmail matches' })).toBeVisible()
+    expect(screen.getByRole('radio', { name: /Quick/ })).toBeChecked()
+    const title = screen.getByLabelText('Role title')
+    await user.clear(title)
+    await user.type(title, 'Data Science Intern')
+    await user.click(screen.getByRole('button', { name: 'Add & next' }))
+
+    await waitFor(async () => expect(await repository.listEntries()).toHaveLength(1))
+    expect((await repository.listEntries())[0]).toMatchObject({
+      company: 'Acme', title: 'Data Science Intern', effort: 'quick',
+      origin: { provider: 'gmail', messageId: 'gmail-1' },
+    })
+    expect(await screen.findByText('Inbox clear')).toBeVisible()
+    expect(await repository.getGmailCandidate('gmail-1')).toMatchObject({ state: 'imported' })
+  })
+
+  it('allows Targeted classification, dismissal, and duplicate review warnings', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const existing = createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-10', effort: 'quick',
+    })
+    await repository.saveEntry(existing)
+    await repository.saveGmailCandidate(createGmailCandidate({
+      messageId: 'gmail-2', threadId: 'thread-2', receivedAt: '2026-09-10T13:30:00.000Z',
+      submittedDate: '2026-09-10', sender: 'jobs@acme.com', subject: 'Application received',
+      company: 'Acme', title: 'ML Intern', confidence: 'medium', matchedRule: 'generic-confirmation',
+      createdAt: '2026-09-10T14:00:00.000Z',
+    }))
+    render(<App repository={repository} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Review, 1 pending' }))
+    expect(screen.getByText(/already has this company, role, and date/i)).toBeVisible()
+    await user.click(screen.getByRole('radio', { name: /Targeted/ }))
+    expect(screen.getByRole('radio', { name: /Targeted/ })).toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+
+    expect(await screen.findByText('Inbox clear')).toBeVisible()
+    expect(await repository.listEntries()).toEqual([existing])
+    expect(await repository.getGmailCandidate('gmail-2')).toMatchObject({ state: 'dismissed' })
+  })
+
+  it('shows Gmail setup guidance without blocking manual tracking', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    render(<App repository={repository} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Settings & data' }))
+    expect(screen.getByRole('heading', { name: 'Gmail import' })).toBeVisible()
+    expect(screen.getByText(/Google OAuth client ID/i)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Applications' })).toBeVisible()
+  })
+
+  it('connects Gmail, performs the first scan, and surfaces new review work', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const auth = fakeAuth('disconnected')
+    const api = fakeGmailApi({
+      listInitialMessageIds: vi.fn().mockResolvedValue(['gmail-3']),
+      getMessage: vi.fn().mockResolvedValue(gmailMessage('gmail-3')),
+    })
+    render(<App repository={repository} gmailAuth={auth} gmailApiFactory={() => api} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Settings & data' }))
+    await user.click(screen.getByRole('button', { name: 'Connect Gmail & scan' }))
+
+    expect(await screen.findByText('1 Gmail match is ready to review')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Review, 1 pending' })).toBeVisible()
+    expect(api.listInitialMessageIds).toHaveBeenCalledOnce()
+    expect((await repository.getGmailSyncState()).accountEmail).toBe('max@example.com')
+  })
+
+  it('synchronizes on open when the in-memory authorization is still valid', async () => {
+    await readyRepository(repository)
+    const auth = fakeAuth('connected')
+    const api = fakeGmailApi()
+    render(<App repository={repository} gmailAuth={auth} gmailApiFactory={() => api} />)
+
+    await waitFor(() => expect(api.getProfile).toHaveBeenCalledOnce())
+    expect(auth.requestToken).not.toHaveBeenCalled()
+  })
 })
 
 async function readyRepository(repository: TrackerRepository) {
@@ -118,4 +218,54 @@ async function readyRepository(repository: TrackerRepository) {
     sources: ['LinkedIn', 'Company site', 'Career fair', 'Referral'],
     lastBackupAt: null,
   })
+}
+
+function fakeAuth(initialStatus: GmailAuthStatus): GmailAuthClient {
+  let state: GmailAuthState = { status: initialStatus }
+  let token = initialStatus === 'connected' ? 'token' : null
+  const listeners = new Set<(next: GmailAuthState) => void>()
+  const update = (next: GmailAuthState) => {
+    state = next
+    for (const listener of listeners) listener(next)
+  }
+  return {
+    requestToken: vi.fn(async () => {
+      token = 'token'
+      update({ status: 'connected', expiresAt: Date.now() + 3_600_000 })
+      return token
+    }),
+    getValidToken: vi.fn(() => token),
+    getState: () => state,
+    invalidate: () => { token = null; update({ status: 'expired' }) },
+    disconnect: vi.fn(async () => { token = null; update({ status: 'disconnected' }) }),
+    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
+  }
+}
+
+function fakeGmailApi(overrides: Partial<GmailApiClient> = {}): GmailApiClient {
+  return {
+    getProfile: vi.fn().mockResolvedValue({ emailAddress: 'max@example.com', historyId: '500' }),
+    listInitialMessageIds: vi.fn().mockResolvedValue([]),
+    listHistoryMessageIds: vi.fn().mockResolvedValue({ messageIds: [], historyId: '500' }),
+    getMessage: vi.fn(),
+    ...overrides,
+  }
+}
+
+function gmailMessage(id: string): GmailApiMessage {
+  const text = 'Thank you for applying to Data Science Intern at Acme.'
+  const bytes = new TextEncoder().encode(text)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return {
+    id, threadId: `thread-${id}`, internalDate: '1789047000000',
+    payload: {
+      mimeType: 'text/plain',
+      headers: [
+        { name: 'From', value: 'Acme Recruiting <jobs@acme.com>' },
+        { name: 'Subject', value: 'Thank you for applying' },
+      ],
+      body: { data: btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '') },
+    },
+  }
 }

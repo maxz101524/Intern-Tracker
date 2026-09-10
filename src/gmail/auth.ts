@@ -33,6 +33,7 @@ export interface GmailAuthClient {
   requestToken(): Promise<string>
   getValidToken(): string | null
   getState(): GmailAuthState
+  invalidate(): void
   disconnect(): Promise<void>
   subscribe(listener: (state: GmailAuthState) => void): () => void
 }
@@ -134,6 +135,11 @@ export function createGmailAuthClient(clientId: string, providedOAuth?: GoogleOA
     requestToken,
     getValidToken,
     getState: () => state,
+    invalidate() {
+      accessToken = null
+      expiresAt = 0
+      setState({ status: 'expired' })
+    },
     disconnect,
     subscribe(listener) {
       listeners.add(listener)
@@ -148,17 +154,20 @@ function loadGoogleIdentityServices(): Promise<GoogleOAuth2> {
   if (googleScriptPromise) return googleScriptPromise
 
   googleScriptPromise = new Promise<GoogleOAuth2>((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = GOOGLE_SCRIPT
-    script.async = true
-    script.defer = true
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${GOOGLE_SCRIPT}"]`)
+    const script = existingScript ?? document.createElement('script')
     script.onload = () => {
       const loaded = window.google?.accounts?.oauth2
       if (loaded) resolve(loaded)
       else reject(new Error('Google authorization could not start.'))
     }
     script.onerror = () => reject(new Error('Google authorization could not start.'))
-    document.head.append(script)
+    if (!existingScript) {
+      script.src = GOOGLE_SCRIPT
+      script.async = true
+      script.defer = true
+      document.head.append(script)
+    }
   }).catch((error) => {
     googleScriptPromise = null
     throw error

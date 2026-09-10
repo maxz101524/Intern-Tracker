@@ -2,15 +2,18 @@ import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, Database, Download, FileSpreadsheet, Plus, Upload, X } from 'lucide-react'
 import { buildBackup, entriesToCsv, parseBackup } from '../domain/backup'
 import type { ApplicationEntry, AppSettings, TrackerBackup } from '../domain/types'
+import type { GmailImportController } from '../hooks/useGmailImport'
+import { GmailSettings } from './GmailSettings'
 
 interface SettingsProps {
   entries: ApplicationEntry[]
   settings: AppSettings
+  gmail: GmailImportController
   onSave: (settings: AppSettings) => Promise<void>
   onRestore: (raw: string) => Promise<void>
 }
 
-export function Settings({ entries, settings, onSave, onRestore }: SettingsProps) {
+export function Settings({ entries, settings, gmail, onSave, onRestore }: SettingsProps) {
   const [target, setTarget] = useState(String(settings.weeklyTarget))
   const [sources, setSources] = useState(settings.sources)
   const [newSource, setNewSource] = useState('')
@@ -40,7 +43,7 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
   async function exportJson() {
     const exportedAt = new Date().toISOString()
     const nextSettings = { ...settings, lastBackupAt: exportedAt }
-    const backup = buildBackup(entries, nextSettings, exportedAt)
+    const backup = buildBackup(entries, nextSettings, gmail.gmailData, exportedAt)
     downloadText(
       `paceboard-backup-${exportedAt.slice(0, 10)}.json`,
       JSON.stringify(backup, null, 2),
@@ -80,6 +83,7 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
   }
 
   const totalInRestore = restore?.backup.entries.length ?? 0
+  const pendingInRestore = restore?.backup.gmail.candidates.filter((candidate) => candidate.state === 'pending').length ?? 0
 
   return (
     <div className="page-content settings-page">
@@ -89,6 +93,7 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
       {error && <p className="form-error settings-error" role="alert">{error}</p>}
 
       <div className="settings-layout">
+        <GmailSettings gmail={gmail} />
         <form className="settings-section" onSubmit={savePreferences}>
           <div className="settings-heading"><span className="settings-icon"><Database size={20} /></span><div><h2>Tracking preferences</h2><p>Set the pace and sources that fit your search.</p></div></div>
           <label className="setting-field">Weekly target<input type="number" min="1" max="500" value={target} onChange={(event) => setTarget(event.target.value)} /></label>
@@ -127,7 +132,7 @@ export function Settings({ entries, settings, onSave, onRestore }: SettingsProps
           <section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="restore-title">
             <span className="warning-icon"><AlertTriangle /></span>
             <h2 id="restore-title">Replace current data?</h2>
-            <p>The backup contains <strong>{totalInRestore} applications</strong>, including their status histories. Restoring replaces this browser’s current entries and settings.</p>
+            <p>The backup contains <strong>{totalInRestore} applications</strong> and <strong>{pendingInRestore} Gmail matches</strong> waiting for review. Restoring replaces this browser’s current entries, settings, and Gmail import history, but never Gmail authorization.</p>
             <div className="modal-actions"><button type="button" className="button secondary" onClick={() => setRestore(null)}>Cancel</button><button type="button" className="button danger" onClick={confirmRestore}>Replace and restore</button></div>
           </section>
         </div>

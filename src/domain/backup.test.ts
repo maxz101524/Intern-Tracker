@@ -84,6 +84,7 @@ describe('backup and export v3', () => {
       submittedDate: '2026-09-03',
       effort: 'targeted',
       notes: 'Said "hello"\nFollow up Friday',
+      origin: { provider: 'gmail', messageId: 'gmail-42' },
     }), 'online_assessment', '2026-09-10')
 
     const csv = entriesToCsv([application], '2026-09-24')
@@ -93,6 +94,7 @@ describe('backup and export v3', () => {
     expect(csv).toContain('Online assessment')
     expect(csv).toContain('2026-09-03:Applied | 2026-09-10:Online assessment')
     expect(csv).toContain('"Acme, Inc."')
+    expect(csv).toContain('gmail,gmail-42')
     expect(csv).toContain('"Said ""hello""\nFollow up Friday"')
   })
 })

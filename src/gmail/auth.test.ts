@@ -64,6 +64,17 @@ describe('Gmail browser authorization', () => {
     await expect(first).resolves.toBe('token')
     await expect(second).resolves.toBe('token')
   })
+
+  it('ends a request safely when the Google dialog closes without a callback', async () => {
+    const auth = createGmailAuthClient('client-id', fakeOAuth(() => ({ requestAccessToken: vi.fn() })))
+    const request = auth.requestToken()
+    const rejected = expect(request).rejects.toThrow('Google authorization was not completed.')
+
+    await vi.advanceTimersByTimeAsync(120_000)
+
+    await rejected
+    expect(auth.getState().status).toBe('error')
+  })
 })
 
 function fakeOAuth(

@@ -97,6 +97,26 @@ describe('Gmail synchronization', () => {
     expect(await repository.getGmailSyncState()).toEqual(previous)
   })
 
+  it('retries individual messages that previously failed local parsing', async () => {
+    await repository.saveGmailSyncState({
+      key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
+      lastSuccessfulSyncAt: '2026-09-09T12:00:00.000Z', initialSyncCompleted: true,
+    })
+    await repository.saveProcessedGmailMessage({
+      messageId: 'm1', disposition: 'error', processedAt: '2026-09-09T12:00:00.000Z',
+    })
+    const api = fakeApi({
+      listHistoryMessageIds: vi.fn().mockResolvedValue({ messageIds: [], historyId: '520' }),
+      getMessage: vi.fn().mockResolvedValue(message('m1', 'Application received', 'We received your application for the ML Intern position at Acme.')),
+    })
+
+    const result = await syncGmail({ api, repository, now: new Date('2026-09-10T14:00:00.000Z') })
+
+    expect(result).toMatchObject({ newCandidates: 1, inspectedMessages: 1 })
+    expect(api.getMessage).toHaveBeenCalledWith('m1')
+    expect((await repository.listProcessedGmailMessages())[0].disposition).toBe('candidate')
+  })
+
   it('fails closed when a different Gmail account is selected', async () => {
     await repository.saveGmailSyncState({
       key: 'gmail', accountEmail: 'first@example.com', historyId: '500', initialSyncCompleted: true,

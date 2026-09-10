@@ -47,6 +47,7 @@ p { color: var(--muted); line-height: 1.5; }
 .sidebar nav button { width: 100%; min-height: 43px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border: 0; border-radius: 7px; color: #9eabc2; background: transparent; cursor: pointer; text-align: left; font-size: .86rem; font-weight: 590; }
 .sidebar nav button:hover { color: #fff; background: rgba(255,255,255,.06); }
 .sidebar nav button.active { color: #fff; background: #2a3959; box-shadow: inset 3px 0 #7190ff; }
+.nav-count { min-width: 1.35rem; height: 1.35rem; display: inline-grid; place-items: center; margin-left: auto; padding: 0 .3rem; border-radius: 999px; color: #fff; background: var(--blue); font-size: .63rem; font-variant-numeric: tabular-nums; }
 .sidebar-note { display: flex; align-items: flex-start; gap: 9px; margin-top: auto; padding: 14px 11px; border-block: 1px solid rgba(255,255,255,.13); color: #9fb0ca; }
 .sidebar-note svg { margin-top: 2px; color: #7593ff; }
 .sidebar-note p { display: grid; gap: 2px; margin: 0; color: inherit; font-size: .79rem; line-height: 1.35; }
@@ -196,6 +197,34 @@ input:hover, select:hover, textarea:hover { border-color: #a7b3c4; }
 .inline-note { margin: -5px 0 0; padding:9px 11px; color:#745019; background:var(--amber-pale); font-size:.7rem; }
 .form-error { margin:0; color:var(--red); font-size:.76rem; font-weight:600; }
 
+.review-page { max-width: 1050px; }
+.review-header { align-items: center; }
+.review-total { display: inline-flex; align-items: center; gap: 7px; flex: none; padding: 8px 11px; border: 1px solid #cdd7e5; border-radius: 999px; color: #4f5d73; background: rgba(255,255,255,.75); font-size: .73rem; font-weight: 680; }
+.review-card { max-width: 780px; display: grid; gap: 0; overflow: hidden; border: 1px solid #cbd6e7; border-top: 4px solid var(--blue); background: var(--paper); box-shadow: 0 17px 42px rgba(33,52,86,.08); }
+.review-progress { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 12px 20px; border-bottom: 1px solid var(--line); color: var(--muted); background: #f8fafe; font-size: .7rem; font-weight: 680; font-variant-numeric: tabular-nums; }
+.confidence-pill { padding: 4px 7px; border-radius: 999px; text-transform: capitalize; }
+.confidence-pill.high { color: #087469; background: var(--teal-pale); }
+.confidence-pill.medium { color: #855813; background: var(--amber-pale); }
+.email-context { padding: 23px 24px 20px; border-bottom: 1px solid var(--line); }
+.email-context h2 { max-width: 650px; font-size: 1.32rem; line-height: 1.25; }
+.email-context > p:not(.context-label) { margin: 6px 0 12px; font-size: .76rem; overflow-wrap: anywhere; }
+.email-context > div { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 18px; }
+.email-context time { color: var(--muted); font-size: .7rem; }
+.email-context a { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); font-size: .72rem; font-weight: 680; text-decoration: none; }
+.review-card form { display: grid; gap: 17px; padding: 23px 24px 24px; }
+.review-date { max-width: 210px; }
+.effort-control label:has(input:focus-visible) { outline: 3px solid rgba(49,94,251,.28); outline-offset: 2px; }
+.duplicate-warning { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 11px; color: #745019; background: var(--amber-pale); font-size: .72rem; }
+.duplicate-warning svg { flex: none; margin-top: 1px; }
+.review-actions { display: flex; align-items: center; gap: 8px; padding-top: 17px; border-top: 1px solid var(--line); }
+.review-pagination { display: flex; gap: 3px; }
+.review-pagination .icon-button { border: 1px solid var(--line); }
+.review-pagination .icon-button:disabled { opacity: .4; cursor: default; }
+.review-empty { max-width: 780px; min-height: 330px; display: grid; place-content: center; justify-items: center; padding: 40px; border: 1px dashed #c2cddd; background: rgba(255,255,255,.6); text-align: center; }
+.review-empty > span { width: 54px; height: 54px; display: grid; place-items: center; margin-bottom: 15px; border-radius: 15px; color: var(--teal); background: var(--teal-pale); }
+.review-empty h2 { font-size: 1.25rem; }
+.review-empty p { max-width: 390px; margin: 4px 0 0; font-size: .78rem; }
+
 .analytics-health { margin-top:0; }
 .weekly-chart { height:152px; display:grid; grid-template-columns:repeat(8,1fr); align-items:end; gap:8px; margin-top:18px; }
 .weekly-chart > div { height:100%; display:grid; grid-template-rows:18px 1fr 20px; align-items:end; text-align:center; }
@@ -219,6 +248,26 @@ input:hover, select:hover, textarea:hover { border-color: #a7b3c4; }
 
 .settings-layout { display:grid; grid-template-columns:1fr 1fr; gap:17px; }
 .settings-section { display:flex; flex-direction:column; gap:21px; padding:25px; border:1px solid var(--line); background:var(--paper); }
+.gmail-settings { grid-column: 1 / -1; }
+.gmail-config-note { display: flex; align-items: flex-start; gap: 10px; padding: 13px; color: #745019; background: var(--amber-pale); }
+.gmail-config-note svg { flex: none; margin-top: 2px; }
+.gmail-config-note strong { font-size: .8rem; }
+.gmail-config-note p { margin: 3px 0 0; color: #856224; font-size: .72rem; }
+.gmail-status-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.gmail-status-row > div:first-child { position: relative; padding-left: 17px; }
+.gmail-status-row strong { font-size: .84rem; }
+.gmail-status-row p { margin: 3px 0 0; font-size: .7rem; }
+.connection-dot { position: absolute; top: 5px; left: 0; width: 8px; height: 8px; border-radius: 50%; background: #9ba6b7; }
+.connection-dot.connected { background: var(--teal); box-shadow: 0 0 0 4px rgba(17,153,139,.12); }
+.gmail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.gmail-sync-summary { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 12px 14px; border-block: 1px solid var(--line-soft); color: var(--muted); background: #fafbfc; font-size: .71rem; }
+.gmail-sync-summary strong { color: var(--ink); }
+.sync-ok { display: inline-flex; align-items: center; gap: 5px; color: #17766b; }
+.gmail-privacy { max-width: 790px; margin: -4px 0 0; font-size: .7rem; }
+.gmail-reset { display: flex; }
+.inline-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; color: #793e43; background: var(--red-pale); }
+.inline-confirm p { flex: 1; min-width: 230px; margin: 0; color: inherit; font-size: .72rem; }
+.spin { animation: spin .8s linear infinite; }
 .settings-heading { display:flex; align-items:flex-start; gap:12px; padding-bottom:16px; border-bottom:1px solid var(--line); }
 .settings-heading p { margin:0; font-size:.77rem; }
 .settings-icon { width:37px; height:37px; display:grid; place-items:center; flex:none; border-radius:8px; color:var(--blue); background:var(--blue-pale); }
@@ -278,6 +327,7 @@ input:hover, select:hover, textarea:hover { border-color: #a7b3c4; }
 .fatal-state p { max-width:500px; }
 
 @keyframes drawer-in { from { transform:translateX(24px); opacity:.7; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
 
 @media (max-width:1100px) {
@@ -309,9 +359,11 @@ input:hover, select:hover, textarea:hover { border-color: #a7b3c4; }
   .app-shell { display:block; padding-bottom:66px; }
   .sidebar { position:fixed; top:auto; bottom:0; z-index:10; width:100%; height:66px; padding:6px 8px; border-top:1px solid #35425b; }
   .sidebar > .brand-lockup, .sidebar-note, .local-note { display:none; }
-  .sidebar nav { grid-template-columns:repeat(4,1fr); gap:4px; margin:0; }
+  .sidebar nav { grid-template-columns:repeat(5,1fr); gap:4px; margin:0; }
   .sidebar nav button { justify-content:center; height:52px; padding:5px; font-size:.65rem; }
   .sidebar nav button span { display:none; }
+  .sidebar nav button .nav-count { position: absolute; top: 4px; right: calc(50% - 20px); min-width: 16px; height: 16px; display: inline-grid; padding: 0 3px; font-size: .55rem; }
+  .sidebar nav button { position: relative; }
   .sidebar nav button.active { box-shadow:inset 0 -3px #7190ff; }
   .page-content { padding:32px 16px 48px; }
   .page-header { align-items:flex-start; }
@@ -344,6 +396,17 @@ input:hover, select:hover, textarea:hover { border-color: #a7b3c4; }
   .drawer-action-spacer { display:none; }
   .drawer-actions .button { flex:1; }
   .drawer-actions .danger-text { flex-basis:100%; justify-content:flex-start; }
+  .review-header { display: grid; }
+  .review-total { justify-self: start; }
+  .review-progress, .email-context, .review-card form { padding-left: 16px; padding-right: 16px; }
+  .review-actions { align-items: stretch; flex-direction: column-reverse; }
+  .review-actions .drawer-action-spacer { display: none; }
+  .review-actions .button { width: 100%; }
+  .review-pagination { align-self: stretch; justify-content: space-between; }
+  .review-pagination .icon-button { width: 46%; }
+  .gmail-status-row { align-items: stretch; flex-direction: column; }
+  .gmail-actions { justify-content: stretch; }
+  .gmail-actions .button { flex: 1; }
   .performance-table { overflow-x:auto; }
   .performance-head, .performance-row { min-width:650px; }
   .toast { right:13px; bottom:79px; left:13px; }

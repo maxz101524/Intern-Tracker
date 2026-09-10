@@ -72,9 +72,11 @@ export function createGmailAuthClient(clientId: string, providedOAuth?: GoogleOA
       oauth = resolved
       return new Promise<string>((resolve, reject) => {
         let settled = false
+        let timeout = 0
         const finishError = () => {
           if (settled) return
           settled = true
+          window.clearTimeout(timeout)
           const error = new Error('Google authorization was not completed.')
           setState({ status: 'error', error: error.message })
           reject(error)
@@ -89,6 +91,7 @@ export function createGmailAuthClient(clientId: string, providedOAuth?: GoogleOA
               return
             }
             settled = true
+            window.clearTimeout(timeout)
             accessToken = response.access_token
             expiresAt = Date.now() + Math.max(0, response.expires_in ?? 3600) * 1000
             setState({ status: 'connected', expiresAt })
@@ -96,6 +99,7 @@ export function createGmailAuthClient(clientId: string, providedOAuth?: GoogleOA
           },
           error_callback: finishError,
         })
+        timeout = window.setTimeout(finishError, 120_000)
         client.requestAccessToken({ prompt: '' })
       })
     }

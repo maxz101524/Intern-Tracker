@@ -55,12 +55,12 @@ export function useGmailImport(
   const runSync = useCallback((token?: string): Promise<void> => {
     if (syncInFlight.current) return syncInFlight.current
     const operation = (async () => {
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        throw new Error('You appear to be offline. Gmail sync will retry when you are connected.')
-      }
       setSyncStatus('syncing')
       setError('')
       try {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          throw new Error('You appear to be offline. Gmail sync will retry when you are connected.')
+        }
         const api = createApi(() => token ?? auth.getValidToken())
         const result = await syncGmail({ api, repository })
         await refresh()
@@ -88,8 +88,15 @@ export function useGmailImport(
   }, [auth, runSync])
 
   const connectAndSync = useCallback(async () => {
-    const token = await auth.requestToken()
-    await runSync(token)
+    try {
+      const token = await auth.requestToken()
+      await runSync(token)
+    } catch (caught) {
+      if (auth.getState().status === 'error') {
+        setError(auth.getState().error ?? 'Google authorization was not completed.')
+      }
+      throw caught
+    }
   }, [auth, runSync])
 
   const syncNow = useCallback(async () => {

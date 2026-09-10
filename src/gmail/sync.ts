@@ -66,11 +66,12 @@ export async function syncGmail({
   }
 
   const knownIds = new Set([
-    ...processed.map((message) => message.messageId),
+    ...processed.filter((message) => message.disposition !== 'error').map((message) => message.messageId),
     ...candidates.map((candidate) => candidate.messageId),
     ...entries.flatMap((entry) => entry.origin?.provider === 'gmail' ? [entry.origin.messageId] : []),
   ])
-  const pendingIds = [...new Set(messageIds)].filter((id) => !knownIds.has(id))
+  const retryIds = processed.filter((message) => message.disposition === 'error').map((message) => message.messageId)
+  const pendingIds = [...new Set([...messageIds, ...retryIds])].filter((id) => !knownIds.has(id))
   const outcomes = await mapWithConcurrency(pendingIds, MESSAGE_CONCURRENCY, async (messageId) => {
     const raw = await api.getMessage(messageId)
     try {

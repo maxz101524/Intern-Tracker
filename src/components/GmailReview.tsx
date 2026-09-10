@@ -30,7 +30,7 @@ export function GmailReview({ candidates, entries, onAccept, onDismiss }: GmailR
         <section className="review-empty">
           <span><MailCheck size={28} /></span>
           <h2>Inbox clear</h2>
-          <p>New application confirmations will wait here after the next Gmail sync.</p>
+          <p>New application confirmations will wait here after the next Gmail sync. Syncing again also retries messages that could not be read.</p>
         </section>
       ) : (
         <ReviewCard

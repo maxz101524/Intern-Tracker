@@ -3,6 +3,9 @@ dist
 .DS_Store
 coverage
 *.local
+.env
+.env.*
+!.env.example
 .vercel
 .superpowers/
 .worktrees/

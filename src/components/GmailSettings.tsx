@@ -47,7 +47,7 @@ export function GmailSettings({ gmail }: { gmail: GmailImportController }) {
         </>
       )}
 
-      {gmail.error && <p className="form-error" role="alert">{gmail.error}</p>}
+      {(gmail.error || gmail.authState.error) && <p className="form-error" role="alert">{gmail.error || gmail.authState.error}</p>}
       <p className="gmail-privacy">Paceboard reads confirmation messages in this browser. It stores only review fields and Gmail IDs—not access tokens or complete email bodies.</p>
 
       {gmail.gmailData.syncState.initialSyncCompleted && (

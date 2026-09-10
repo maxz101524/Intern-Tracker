@@ -7,10 +7,10 @@ import { Onboarding } from './components/Onboarding'
 import { Overview } from './components/Overview'
 import { Settings } from './components/Settings'
 import { GmailReview } from './components/GmailReview'
-import type { ApplicationEntry, AppSettings } from './domain/types'
+import type { ApplicationEntry, AppSettings, GmailCandidate } from './domain/types'
 import { createGmailApiClient, type GmailApiClient } from './gmail/api'
 import { createGmailAuthClient, type GmailAuthClient } from './gmail/auth'
-import { useGmailImport } from './hooks/useGmailImport'
+import { useGmailImport, type GmailReviewInput } from './hooks/useGmailImport'
 import { trackerRepository, type TrackerRepository } from './storage/repository'
 
 interface AppProps {
@@ -92,6 +92,11 @@ export function App({
     await Promise.all([load(), gmail.refresh()])
   }
 
+  async function acceptGmailCandidate(candidate: GmailCandidate, input: GmailReviewInput) {
+    await gmail.acceptCandidate(candidate, input)
+    setToast({ message: 'Application added from Gmail' })
+  }
+
   function addApplication() {
     setDrawerEntry(undefined)
     setDrawerOpen(true)
@@ -132,7 +137,7 @@ export function App({
         {needsBackup && page !== 'settings' && <button type="button" className="backup-warning" onClick={() => setPage('settings')}><AlertTriangle size={16} /><span>Your local data needs a backup.</span><strong>Back up now</strong></button>}
         {page === 'overview' && <Overview entries={entries} settings={settings} onAdd={addApplication} onEdit={editApplication} onOpenApplications={() => setPage('applications')} />}
         {page === 'applications' && <Applications entries={entries} sources={settings.sources} onAdd={addApplication} onEdit={editApplication} />}
-        {page === 'review' && <GmailReview candidates={gmail.pendingCandidates} entries={entries} onAccept={gmail.acceptCandidate} onDismiss={gmail.dismissCandidate} />}
+        {page === 'review' && <GmailReview candidates={gmail.pendingCandidates} entries={entries} onAccept={acceptGmailCandidate} onDismiss={gmail.dismissCandidate} />}
         {page === 'analytics' && <Analytics entries={entries} />}
         {page === 'settings' && <Settings entries={entries} settings={settings} gmail={gmail} onSave={saveSettings} onRestore={restore} />}
       </main>

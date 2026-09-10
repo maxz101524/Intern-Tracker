@@ -58,4 +58,17 @@ describe('singular application rules', () => {
     expect(edited.company).toBe('Verisk Analytics')
     expect(edited.notes).toBe('Met recruiter')
   })
+
+  it('validates and preserves an optional Gmail origin', () => {
+    const entry = createApplication({
+      company: 'Acme', title: 'Data Science Intern', submittedDate: '2026-09-10', effort: 'quick',
+      origin: { provider: 'gmail', messageId: ' gmail-1 ' },
+    })
+
+    expect(entry.origin).toEqual({ provider: 'gmail', messageId: 'gmail-1' })
+    expect(() => createApplication({
+      company: 'Acme', title: 'Data Science Intern', submittedDate: '2026-09-10', effort: 'quick',
+      origin: { provider: 'gmail', messageId: ' ' },
+    })).toThrow('Application origin is not valid.')
+  })
 })

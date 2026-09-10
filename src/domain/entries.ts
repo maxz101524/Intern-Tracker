@@ -1,5 +1,5 @@
 import { isApplicationStatus, isValidDateOnly } from './status'
-import type { ApplicationEntry, ApplicationInput, StatusEvent } from './types'
+import type { ApplicationEntry, ApplicationInput, ApplicationOrigin, StatusEvent } from './types'
 
 export function createApplication(input: ApplicationInput): ApplicationEntry {
   const company = required(input.company, 'Company is required.')
@@ -21,9 +21,17 @@ export function createApplication(input: ApplicationInput): ApplicationEntry {
     url: clean(input.url),
     resumeVariant: clean(input.resumeVariant),
     notes: clean(input.notes),
+    origin: normalizeOrigin(input.origin),
     statusHistory,
     updatedAt: input.updatedAt ?? new Date().toISOString(),
   }) as ApplicationEntry
+}
+
+function normalizeOrigin(origin?: ApplicationOrigin): ApplicationOrigin | undefined {
+  if (!origin) return undefined
+  const messageId = origin.messageId?.trim()
+  if (origin.provider !== 'gmail' || !messageId) throw new Error('Application origin is not valid.')
+  return { provider: 'gmail', messageId }
 }
 
 function normalizeHistory(history: StatusEvent[] | undefined, submittedDate: string): StatusEvent[] {

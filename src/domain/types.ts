@@ -17,6 +17,11 @@ export interface StatusEvent {
   date: string
 }
 
+export interface ApplicationOrigin {
+  provider: 'gmail'
+  messageId: string
+}
+
 export interface ApplicationEntry {
   id: string
   company: string
@@ -27,6 +32,7 @@ export interface ApplicationEntry {
   url?: string
   resumeVariant?: string
   notes?: string
+  origin?: ApplicationOrigin
   statusHistory: StatusEvent[]
   updatedAt: string
 }
@@ -43,9 +49,48 @@ export interface AppSettings {
   lastBackupAt: string | null
 }
 
+export type GmailCandidateState = 'pending' | 'imported' | 'dismissed'
+
+export interface GmailCandidate {
+  messageId: string
+  threadId: string
+  receivedAt: string
+  submittedDate: string
+  sender: string
+  subject: string
+  company: string
+  title: string
+  confidence: 'high' | 'medium'
+  matchedRule: string
+  state: GmailCandidateState
+  createdAt: string
+  reviewedAt?: string
+}
+
+export interface ProcessedGmailMessage {
+  messageId: string
+  disposition: 'candidate' | 'ignored' | 'imported' | 'dismissed' | 'error'
+  processedAt: string
+}
+
+export interface GmailSyncState {
+  key: 'gmail'
+  accountEmail?: string
+  historyId?: string
+  lastSuccessfulSyncAt?: string
+  initialSyncCompleted: boolean
+}
+
+export interface GmailImportData {
+  candidates: GmailCandidate[]
+  processedMessages: ProcessedGmailMessage[]
+  syncState: GmailSyncState
+}
+
 export interface TrackerBackup {
-  version: 2
+  version: 3
   exportedAt: string
   entries: ApplicationEntry[]
   settings: AppSettings
+  gmail: GmailImportData
 }

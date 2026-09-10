@@ -1,13 +1,37 @@
 import { createApplication } from './entries'
+import {
+  createGmailCandidate,
+  createGmailSyncState,
+  createProcessedGmailMessage,
+  emptyGmailImportData,
+} from './gmail'
 import { getDisplayStatus, statusLabel, todayDate } from './status'
-import type { ApplicationEntry, ApplicationInput, AppSettings, TrackerBackup } from './types'
+import type { ApplicationEntry, ApplicationInput, AppSettings, GmailImportData, TrackerBackup } from './types'
 
 export function buildBackup(
   entries: ApplicationEntry[],
   settings: AppSettings,
-  exportedAt = new Date().toISOString(),
+  exportedAt?: string,
+): TrackerBackup
+
+export function buildBackup(
+  entries: ApplicationEntry[],
+  settings: AppSettings,
+  gmail: GmailImportData,
+  exportedAt?: string,
+): TrackerBackup
+
+export function buildBackup(
+  entries: ApplicationEntry[],
+  settings: AppSettings,
+  gmailOrExportedAt: GmailImportData | string = emptyGmailImportData(),
+  maybeExportedAt?: string,
 ): TrackerBackup {
-  return { version: 2, exportedAt, entries, settings }
+  const gmail = typeof gmailOrExportedAt === 'string' ? emptyGmailImportData() : gmailOrExportedAt
+  const exportedAt = typeof gmailOrExportedAt === 'string'
+    ? gmailOrExportedAt
+    : maybeExportedAt ?? new Date().toISOString()
+  return { version: 3, exportedAt, entries, settings, gmail }
 }
 
 export function parseBackup(raw: string): TrackerBackup {
@@ -23,17 +47,18 @@ export function parseBackup(raw: string): TrackerBackup {
   }
 
   try {
-    if (!isRecord(data) || data.version !== 2) throw new Error()
+    if (!isRecord(data) || (data.version !== 2 && data.version !== 3)) throw new Error()
     if (!Array.isArray(data.entries) || !validSettings(data.settings)) throw new Error()
     const entries = data.entries.map((candidate) => {
       if (!isRecord(candidate)) throw new Error()
       return createApplication(candidate as unknown as ApplicationInput)
     })
     return {
-      version: 2,
+      version: 3,
       exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : new Date().toISOString(),
       entries,
       settings: data.settings,
+      gmail: data.version === 2 ? emptyGmailImportData() : validGmailImportData(data.gmail),
     }
   } catch {
     throw new Error('This file is not a valid Paceboard backup.')
@@ -43,7 +68,7 @@ export function parseBackup(raw: string): TrackerBackup {
 export function entriesToCsv(entries: ApplicationEntry[], today = todayDate()): string {
   const columns = [
     'id', 'company', 'title', 'submittedDate', 'effort', 'source', 'currentStatus',
-    'statusHistory', 'url', 'resumeVariant', 'notes', 'updatedAt',
+    'statusHistory', 'originProvider', 'originMessageId', 'url', 'resumeVariant', 'notes', 'updatedAt',
   ]
   const rows = entries.map((entry) => {
     const values: unknown[] = [
@@ -55,6 +80,8 @@ export function entriesToCsv(entries: ApplicationEntry[], today = todayDate()): 
       entry.source,
       statusLabel(getDisplayStatus(entry, today)),
       entry.statusHistory.map((event) => `${event.date}:${statusLabel(event.status)}`).join(' | '),
+      entry.origin?.provider,
+      entry.origin?.messageId,
       entry.url,
       entry.resumeVariant,
       entry.notes,
@@ -80,4 +107,21 @@ function validSettings(value: unknown): value is AppSettings {
   return Number.isInteger(value.weeklyTarget) && Number(value.weeklyTarget) >= 0 &&
     Array.isArray(value.sources) && value.sources.every((source) => typeof source === 'string') &&
     (value.lastBackupAt === null || typeof value.lastBackupAt === 'string')
+}
+
+function validGmailImportData(value: unknown): GmailImportData {
+  if (!isRecord(value) || !Array.isArray(value.candidates) || !Array.isArray(value.processedMessages) || !isRecord(value.syncState)) {
+    throw new Error()
+  }
+  return {
+    candidates: value.candidates.map((candidate) => {
+      if (!isRecord(candidate)) throw new Error()
+      return createGmailCandidate(candidate as unknown as Parameters<typeof createGmailCandidate>[0])
+    }),
+    processedMessages: value.processedMessages.map((message) => {
+      if (!isRecord(message)) throw new Error()
+      return createProcessedGmailMessage(message as unknown as Parameters<typeof createProcessedGmailMessage>[0])
+    }),
+    syncState: createGmailSyncState(value.syncState),
+  }
 }

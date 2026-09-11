@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
@@ -13,6 +13,7 @@ describe('Paceboard v2 app', () => {
   let repository: TrackerRepository
 
   beforeEach(async () => {
+    localStorage.clear()
     repository = new TrackerRepository(`paceboard-ui-${crypto.randomUUID()}`)
     await repository.reset()
   })
@@ -49,8 +50,8 @@ describe('Paceboard v2 app', () => {
 
     await waitFor(async () => expect(await repository.listEntries()).toHaveLength(1))
     expect(screen.getByRole('dialog', { name: 'Add application' })).toBeVisible()
-    expect(screen.getByLabelText('Company')).toHaveValue('')
-    expect(screen.getByLabelText('Company')).toHaveFocus()
+    await waitFor(() => expect(screen.getByLabelText('Company')).toHaveValue(''))
+    await waitFor(() => expect(screen.getByLabelText('Company')).toHaveFocus())
     expect(screen.getByLabelText('Submitted')).toHaveValue('2026-09-01')
 
     await user.type(screen.getByLabelText('Company'), 'RSM')
@@ -77,7 +78,7 @@ describe('Paceboard v2 app', () => {
     await user.type(screen.getByLabelText('Status date'), '2026-09-20')
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    expect(await screen.findByText('Interview', { selector: '.status-badge' })).toBeVisible()
+    await waitFor(() => expect(screen.getByLabelText('Status for Cigna AI Intern')).toHaveValue('interview'))
     const [updated] = await repository.listEntries()
     expect(updated.statusHistory.map(({ status }) => status)).toEqual(['applied', 'interview'])
   })
@@ -96,7 +97,7 @@ describe('Paceboard v2 app', () => {
     expect(await screen.findByText('Application deleted')).toBeVisible()
     await waitFor(async () => expect(await repository.listEntries()).toHaveLength(0))
 
-    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await user.click(await screen.findByRole('button', { name: 'Undo' }))
     await waitFor(async () => expect(await repository.listEntries()).toHaveLength(1))
     expect(await screen.findByText('RSM')).toBeVisible()
   })
@@ -113,6 +114,18 @@ describe('Paceboard v2 app', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog', { name: 'Add application' })).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
+  })
+
+  it('restores an unsaved application draft after closing the drawer', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    render(<App repository={repository} />)
+    const trigger = await screen.findByRole('button', { name: 'Add application' })
+    await user.click(trigger)
+    await user.type(screen.getByLabelText('Company'), 'Draft Company')
+    await user.keyboard('{Escape}')
+    await user.click(trigger)
+    expect(screen.getByLabelText('Company')).toHaveValue('Draft Company')
   })
 
   it('reviews a Gmail candidate as Quick by default and accepts edited details', async () => {
@@ -169,6 +182,9 @@ describe('Paceboard v2 app', () => {
     expect(await screen.findByText('Inbox clear')).toBeVisible()
     expect(await repository.listEntries()).toEqual([existing])
     expect(await repository.getGmailCandidate('gmail-2')).toMatchObject({ state: 'dismissed' })
+    await user.click(screen.getByRole('tab', { name: /Dismissed 1/ }))
+    await user.click(screen.getByRole('button', { name: 'Restore' }))
+    await waitFor(async () => expect(await repository.getGmailCandidate('gmail-2')).toMatchObject({ state: 'pending' }))
   })
 
   it('shows Gmail setup guidance without blocking manual tracking', async () => {
@@ -209,6 +225,113 @@ describe('Paceboard v2 app', () => {
 
     await waitFor(() => expect(api.getProfile).toHaveBeenCalledOnce())
     expect(auth.requestToken).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a due assessment and completes it without opening the drawer', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    await repository.saveEntry(createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-01', effort: 'quick',
+      nextAction: 'Complete assessment', nextActionDueDate: new Date().toISOString().slice(0, 10),
+    }))
+    render(<App repository={repository} />)
+
+    expect(await screen.findByRole('heading', { name: 'Needs attention' })).toBeVisible()
+    expect(screen.getByText('Complete assessment')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Done' }))
+
+    await waitFor(async () => expect((await repository.listEntries())[0].nextActionCompleted).toBe(true))
+    await waitFor(() => expect(screen.queryByText('Complete assessment')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('updates a table status directly and reverses it with Undo', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    await repository.saveEntry(createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-01', effort: 'quick',
+    }))
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: 'Applications' }))
+
+    await user.selectOptions(screen.getByLabelText('Status for Acme ML Intern'), 'online_assessment')
+    await waitFor(async () => expect((await repository.listEntries())[0].statusHistory).toHaveLength(2))
+    await user.click(await screen.findByRole('button', { name: 'Undo' }))
+    await waitFor(async () => expect((await repository.listEntries())[0].statusHistory.map(({ status }) => status)).toEqual(['applied']))
+  })
+
+  it('bulk-updates selected applications and reverses the whole change', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    for (const [company, title] of [['Acme', 'ML Intern'], ['Beta', 'DS Intern']]) {
+      await repository.saveEntry(createApplication({ company, title, submittedDate: '2026-09-01', effort: 'quick' }))
+    }
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: 'Applications' }))
+    await user.click(screen.getByLabelText('Select all shown applications'))
+    const bulk = screen.getByRole('region', { name: 'Bulk update applications' })
+    await user.selectOptions(within(bulk).getByLabelText('Status'), 'interview')
+
+    await waitFor(async () => expect((await repository.listEntries()).every((entry) => entry.statusHistory.at(-1)?.status === 'interview')).toBe(true))
+    await user.click(await screen.findByRole('button', { name: 'Undo' }))
+    await waitFor(async () => expect((await repository.listEntries()).every((entry) => entry.statusHistory.length === 1)).toBe(true))
+  })
+
+  it('opens an exact assessment ledger filter from the pipeline count', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const assessment = createApplication({ company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-01', effort: 'quick' })
+    await repository.saveEntry({ ...assessment, statusHistory: [...assessment.statusHistory, { id: 'assessment', status: 'online_assessment', date: '2026-09-08' }] })
+    await repository.saveEntry(createApplication({ company: 'Beta', title: 'DS Intern', submittedDate: '2026-09-02', effort: 'quick' }))
+    render(<App repository={repository} />)
+
+    await user.click(await screen.findByRole('button', { name: /Online assessment\s+1/i }))
+    expect(await screen.findByText('online assessment', { selector: '.active-filters span' })).toBeVisible()
+    expect(screen.getByText('1', { selector: '.ledger-summary strong' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Acme' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Beta' })).not.toBeInTheDocument()
+  })
+
+  it('accepts a Gmail status suggestion into the matched history exactly once', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const application = createApplication({ company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-01', effort: 'quick' })
+    await repository.saveEntry(application)
+    const candidate = createGmailCandidate({
+      messageId: 'status-1', threadId: 'thread-status-1', receivedAt: '2026-09-10T13:30:00.000Z', submittedDate: '2026-09-10',
+      sender: 'Acme <jobs@acme.com>', subject: 'Assessment invitation for ML Intern at Acme', company: 'Acme', title: 'ML Intern',
+      confidence: 'high', matchedRule: 'generic-assessment', kind: 'status', suggestedStatus: 'online_assessment',
+      eventDate: '2026-09-10', matchedEntryIds: [application.id], supportingSnippet: 'Please complete the assessment.',
+    })
+    await repository.saveGmailCandidate(candidate)
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: 'Review, 1 pending' }))
+    await user.click(screen.getByRole('button', { name: 'Accept' }))
+
+    await waitFor(async () => expect((await repository.listEntries())[0].statusHistory).toHaveLength(2))
+    const [updated] = await repository.listEntries()
+    expect(updated.statusHistory[1]).toMatchObject({ status: 'online_assessment', origin: { messageId: 'status-1' } })
+    expect(await repository.getGmailCandidate('status-1')).toMatchObject({ state: 'imported', linkedEntryId: application.id })
+  })
+
+  it('links a duplicate confirmation to the existing application without adding another', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const existing = createApplication({ company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-10', effort: 'quick' })
+    await repository.saveEntry(existing)
+    const candidate = createGmailCandidate({
+      messageId: 'duplicate-1', threadId: 'thread-duplicate-1', receivedAt: '2026-09-10T13:30:00.000Z',
+      submittedDate: '2026-09-10', sender: 'Acme <jobs@acme.com>', subject: 'Application received',
+      company: 'Acme', title: 'ML Intern', confidence: 'high', matchedRule: 'generic-confirmation',
+    })
+    await repository.saveGmailCandidate(candidate)
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: 'Review, 1 pending' }))
+    await user.click(screen.getByRole('button', { name: 'Link to existing' }))
+
+    await waitFor(async () => expect(await repository.listEntries()).toHaveLength(1))
+    expect((await repository.listEntries())[0].origin).toEqual({ provider: 'gmail', messageId: 'duplicate-1' })
+    expect(await repository.getGmailCandidate('duplicate-1')).toMatchObject({ state: 'imported', linkedEntryId: existing.id })
   })
 })
 

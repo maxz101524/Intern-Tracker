@@ -1,4 +1,4 @@
-import type { DetectionResult, NormalizedGmailMessage } from './types'
+import type { DetectionResult, NormalizedGmailMessage, StatusDetectionResult } from './types'
 
 const confirmationMarkers = [
   /thank(?:s| you) for (?:your )?(?:application|applying|interest)/i,
@@ -40,6 +40,51 @@ export function detectApplicationConfirmation(message: NormalizedGmailMessage): 
   const company = extractCompany(message.subject) ?? companyFromSender(message.from)
   if (!title || !company) return null
   return { company, title, confidence: 'medium', matchedRule: rule }
+}
+
+export function detectApplicationStatusUpdate(message: NormalizedGmailMessage): StatusDetectionResult | null {
+  const combined = `${message.subject}\n${message.text}`.replace(/[\t ]+/g, ' ')
+  const suggestedStatus = detectSuggestedStatus(combined)
+  if (!suggestedStatus) return null
+  const pair = extractStatusPair(combined) ?? extractPair(combined)
+  const company = pair?.company ?? extractCompany(message.subject) ?? companyFromSender(message.from)
+  if (!company) return null
+  const title = pair?.title ?? extractTitle(combined) ?? 'Application update'
+  const marker = suggestedStatus === 'online_assessment' ? 'assessment' : suggestedStatus
+  return {
+    company,
+    title,
+    suggestedStatus,
+    confidence: pair ? 'high' : 'medium',
+    matchedRule: `${providerRule(message.from)}-${marker}`,
+    supportingSnippet: excerpt(combined),
+  }
+}
+
+function detectSuggestedStatus(value: string): StatusDetectionResult['suggestedStatus'] | null {
+  if (/\b(?:online |coding |technical )?assessment\b|hackerrank|codesignal/i.test(value) &&
+      /invite|complete|deadline|next step|request/i.test(value)) return 'online_assessment'
+  if (/\binterview\b|phone screen|video call/i.test(value) && /invite|schedule|availability|next step/i.test(value)) return 'interview'
+  if (/unfortunately|not (?:be )?moving forward|other candidates|will not proceed|regret to inform/i.test(value)) return 'rejected'
+  return null
+}
+
+function extractStatusPair(value: string): Pick<DetectionResult, 'company' | 'title'> | null {
+  const patterns = [
+    /(?:assessment|interview) (?:invitation|request)?\s*(?:for|-)\s*(?:the )?(.+?)(?: position| role)?\s+at\s+([^\n.!?]{2,80})/i,
+    /update (?:on|regarding) your application (?:for|to) (?:the )?(.+?)(?: position| role)?\s+at\s+([^\n.!?]{2,80})/i,
+    /(?:role|position)\s*:\s*([^\n|]{2,100}).{0,80}?(?:company|organization)\s*:\s*([^\n|]{2,80})/i,
+  ]
+  for (const pattern of patterns) {
+    const match = value.match(pattern)
+    if (match) return { title: cleanTitle(match[1]), company: cleanCompany(match[2]) }
+  }
+  return null
+}
+
+function excerpt(value: string): string {
+  const text = value.replace(/\s+/g, ' ').trim()
+  return text.length > 220 ? `${text.slice(0, 217)}…` : text
 }
 
 function extractPair(value: string): Pick<DetectionResult, 'company' | 'title'> | null {

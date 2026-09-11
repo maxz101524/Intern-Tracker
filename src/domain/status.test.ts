@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createApplication } from './entries'
-import { appendStatus, getCurrentStatus, getDisplayStatus } from './status'
+import { appendStatus, completeNextAction, getCurrentStatus, getDisplayStatus, snoozeNextAction } from './status'
 
 describe('application status history', () => {
   it('derives No response at exactly 21 local calendar days', () => {
@@ -44,5 +44,18 @@ describe('application status history', () => {
     expect(() => appendStatus(entry, 'recruiter_screen', '2026-09-01')).toThrow(
       'Status date cannot be before the submission date.',
     )
+  })
+
+  it('records a Gmail event once and manages an optional next action', () => {
+    const origin = { provider: 'gmail' as const, messageId: 'message-1' }
+    let entry = createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-01', effort: 'quick',
+      nextAction: 'Complete assessment', nextActionDueDate: '2026-09-10',
+    })
+    entry = appendStatus(entry, 'online_assessment', '2026-09-08', origin)
+    expect(appendStatus(entry, 'interview', '2026-09-09', origin)).toBe(entry)
+    expect(entry.statusHistory).toHaveLength(2)
+    expect(completeNextAction(entry, '2026-09-09T14:00:00.000Z')).toMatchObject({ nextActionCompleted: true })
+    expect(snoozeNextAction(entry, 3, '2026-09-10').nextActionDueDate).toBe('2026-09-13')
   })
 })

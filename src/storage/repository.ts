@@ -1,6 +1,8 @@
 import Dexie, { type EntityTable } from 'dexie'
 import { parseBackup } from '../domain/backup'
 import { emptyGmailImportData } from '../domain/gmail'
+import { mergeApplicationEntries, type RestoreChoices } from '../domain/restore'
+import { normalizeSettings } from '../domain/settings'
 import type {
   ApplicationEntry,
   AppSettings,
@@ -10,12 +12,6 @@ import type {
   GmailSyncState,
   ProcessedGmailMessage,
 } from '../domain/types'
-
-const defaultSettings: AppSettings = {
-  weeklyTarget: 0,
-  sources: ['LinkedIn', 'Handshake', 'Company site', 'Simplify', 'Career fair', 'Referral'],
-  lastBackupAt: null,
-}
 
 interface SettingsRow extends AppSettings { key: 'app' }
 
@@ -37,6 +33,7 @@ export interface GmailCandidateReview {
   candidate: GmailCandidate
   disposition: 'imported' | 'dismissed'
   application?: ApplicationEntry
+  linkedEntryId?: string
   reviewedAt: string
 }
 
@@ -62,6 +59,13 @@ export class TrackerRepository {
       processedGmailMessages: 'messageId, disposition, processedAt',
       gmailSync: 'key',
     })
+    this.db.version(4).stores({
+      entries: 'id, submittedDate, effort, source, company, updatedAt, origin.messageId',
+      settings: 'key',
+      gmailCandidates: 'messageId, state, kind, submittedDate, createdAt',
+      processedGmailMessages: 'messageId, disposition, processedAt',
+      gmailSync: 'key',
+    })
     this.db.entries = this.db.table('entries')
     this.db.settings = this.db.table('settings')
     this.db.gmailCandidates = this.db.table('gmailCandidates')
@@ -77,21 +81,42 @@ export class TrackerRepository {
   }
 
   async saveEntry(entry: ApplicationEntry): Promise<void> {
-    await this.db.entries.put(entry)
+    await this.saveEntries([entry])
+  }
+
+  async saveEntries(entries: ApplicationEntry[]): Promise<void> {
+    if (!entries.length) return
+    await this.db.transaction('rw', this.db.entries, this.db.settings, async () => {
+      await this.db.entries.bulkPut(entries)
+      await this.bumpChanges(entries.length)
+    })
   }
 
   async deleteEntry(id: string): Promise<void> {
-    await this.db.entries.delete(id)
+    await this.db.transaction('rw', this.db.entries, this.db.settings, async () => {
+      await this.db.entries.delete(id)
+      await this.bumpChanges()
+    })
   }
 
   async getSettings(): Promise<AppSettings> {
     const row = await this.db.settings.get('app')
-    if (!row) return { ...defaultSettings, sources: [...defaultSettings.sources] }
-    return { weeklyTarget: row.weeklyTarget, sources: row.sources, lastBackupAt: row.lastBackupAt }
+    return normalizeSettings(row)
   }
 
   async saveSettings(settings: AppSettings): Promise<void> {
-    await this.db.settings.put({ key: 'app', ...settings })
+    await this.db.transaction('rw', this.db.settings, async () => {
+      const current = normalizeSettings(await this.db.settings.get('app'))
+      const next = normalizeSettings(settings)
+      await this.db.settings.put({ ...next, key: 'app', changeCount: current.changeCount + 1 })
+    })
+  }
+
+  async markBackup(exportedAt: string): Promise<AppSettings> {
+    const current = normalizeSettings(await this.db.settings.get('app'))
+    const next = { ...current, lastBackupAt: exportedAt, lastBackupChangeCount: current.changeCount }
+    await this.db.settings.put({ key: 'app', ...next })
+    return next
   }
 
   async listGmailCandidates(state?: GmailCandidateState): Promise<GmailCandidate[]> {
@@ -106,7 +131,10 @@ export class TrackerRepository {
   }
 
   async saveGmailCandidate(candidate: GmailCandidate): Promise<void> {
-    await this.db.gmailCandidates.put(candidate)
+    await this.db.transaction('rw', this.db.gmailCandidates, this.db.settings, async () => {
+      await this.db.gmailCandidates.put(candidate)
+      await this.bumpChanges()
+    })
   }
 
   async listProcessedGmailMessages(): Promise<ProcessedGmailMessage[]> {
@@ -145,10 +173,12 @@ export class TrackerRepository {
       this.db.gmailCandidates,
       this.db.processedGmailMessages,
       this.db.gmailSync,
+      this.db.settings,
       async () => {
         await this.db.gmailCandidates.bulkPut(result.candidates)
         await this.db.processedGmailMessages.bulkPut(result.processedMessages)
         await this.db.gmailSync.put(result.syncState)
+        if (result.candidates.length) await this.bumpChanges(result.candidates.length)
       },
     )
   }
@@ -159,6 +189,7 @@ export class TrackerRepository {
     }
     const candidate: GmailCandidate = {
       ...review.candidate,
+      linkedEntryId: review.linkedEntryId ?? review.candidate.linkedEntryId,
       state: review.disposition,
       reviewedAt: review.reviewedAt,
     }
@@ -172,10 +203,30 @@ export class TrackerRepository {
       this.db.entries,
       this.db.gmailCandidates,
       this.db.processedGmailMessages,
+      this.db.settings,
       async () => {
         if (review.application) await this.db.entries.put(review.application)
         await this.db.gmailCandidates.put(candidate)
         await this.db.processedGmailMessages.put(processed)
+        await this.bumpChanges()
+      },
+    )
+  }
+
+  async restoreGmailCandidate(candidate: GmailCandidate): Promise<void> {
+    const restored: GmailCandidate = { ...candidate, state: 'pending' }
+    delete restored.reviewedAt
+    delete restored.linkedEntryId
+    await this.db.transaction(
+      'rw', this.db.gmailCandidates, this.db.processedGmailMessages, this.db.settings,
+      async () => {
+        await this.db.gmailCandidates.put(restored)
+        await this.db.processedGmailMessages.put({
+          messageId: candidate.messageId,
+          disposition: 'candidate',
+          processedAt: new Date().toISOString(),
+        })
+        await this.bumpChanges()
       },
     )
   }
@@ -194,8 +245,19 @@ export class TrackerRepository {
     )
   }
 
-  async restoreFromJson(raw: string): Promise<void> {
+  async restoreFromJson(
+    raw: string,
+    mode: 'merge' | 'replace' = 'replace',
+    choices: RestoreChoices = {},
+  ): Promise<void> {
     const backup = parseBackup(raw)
+    const currentEntries = mode === 'merge' ? await this.db.entries.toArray() : []
+    const currentGmail = mode === 'merge' ? await this.getGmailImportData() : emptyGmailImportData()
+    const currentSettings = mode === 'merge' ? normalizeSettings(await this.db.settings.get('app')) : normalizeSettings(backup.settings)
+    const entries = mode === 'merge'
+      ? mergeApplicationEntries(currentEntries, backup.entries, choices)
+      : backup.entries
+    const gmail = mode === 'merge' ? mergeGmailData(currentGmail, backup.gmail) : backup.gmail
     await this.db.transaction(
       'rw',
       this.db.entries,
@@ -208,11 +270,11 @@ export class TrackerRepository {
       await this.db.gmailCandidates.clear()
       await this.db.processedGmailMessages.clear()
       await this.db.gmailSync.clear()
-      await this.db.entries.bulkPut(backup.entries)
-      await this.db.settings.put({ key: 'app', ...backup.settings })
-      await this.db.gmailCandidates.bulkPut(backup.gmail.candidates)
-      await this.db.processedGmailMessages.bulkPut(backup.gmail.processedMessages)
-      await this.db.gmailSync.put(backup.gmail.syncState)
+      await this.db.entries.bulkPut(entries)
+      await this.db.settings.put({ key: 'app', ...currentSettings })
+      await this.db.gmailCandidates.bulkPut(gmail.candidates)
+      await this.db.processedGmailMessages.bulkPut(gmail.processedMessages)
+      await this.db.gmailSync.put(gmail.syncState)
       },
     )
   }
@@ -238,6 +300,21 @@ export class TrackerRepository {
   async destroy(): Promise<void> {
     this.db.close()
     await Dexie.delete(this.db.name)
+  }
+
+  private async bumpChanges(amount = 1): Promise<void> {
+    const current = normalizeSettings(await this.db.settings.get('app'))
+    await this.db.settings.put({ key: 'app', ...current, changeCount: current.changeCount + amount })
+  }
+}
+
+function mergeGmailData(current: GmailImportData, backup: GmailImportData): GmailImportData {
+  const byId = <T extends { messageId: string }>(left: T[], right: T[]) =>
+    [...new Map([...right, ...left].map((item) => [item.messageId, item])).values()]
+  return {
+    candidates: byId(current.candidates, backup.candidates),
+    processedMessages: byId(current.processedMessages, backup.processedMessages),
+    syncState: current.syncState.initialSyncCompleted ? current.syncState : backup.syncState,
   }
 }
 

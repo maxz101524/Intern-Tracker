@@ -8,22 +8,24 @@ record per role without turning the job search into a data-entry project.
 - Tracks every application as one role with a company, title, and submission date.
 - Separates Quick applications from Targeted applications that involved a referral,
   event, tailored resume, cover letter, or other meaningful extra effort.
-- Keeps an append-only status history for assessments, screens, interviews, offers,
-  rejections, and withdrawals.
+- Keeps a correctable status history for assessments, screens, interviews, offers,
+  rejections, and withdrawals, with Gmail message IDs used for idempotency.
+- Tracks optional next actions and deadlines, surfaced by urgency on Overview.
 - Automatically displays Applied roles as No response after 21 calendar days while
   leaving the stored status available for future updates.
 - Shows weekly pace, daily activity, pipeline distribution, response rates, and
   Quick-versus-Targeted performance.
-- Provides a searchable Applications ledger and a fast “Save & add another” flow
-  for backfilling or high-volume application sessions.
-- Connects directly to Gmail in the browser and detects application-confirmation
-  messages from common recruiting systems.
-- Places every detected confirmation in a one-at-a-time review queue with Quick
-  preselected, editable role details, duplicate warnings, and a Targeted option.
+- Provides a searchable, sortable Applications ledger with direct status edits,
+  bulk updates, undo, presets, saved views, and configurable columns.
+- Connects directly to Gmail in the browser and detects application confirmations,
+  assessment invitations, interview invitations, and rejection messages.
+- Places detected messages in a review queue with explicit matching, duplicate
+  resolution, supporting email links, dismissed-item recovery, and no automatic writes.
 - Uses Gmail history checkpoints after a bounded 30-day first scan so later syncs
   inspect only new mailbox activity.
 - Stores data in IndexedDB in the current browser.
-- Exports complete JSON backups and one-row-per-role CSV files.
+- Exports complete JSON backups, previews merge/replace restores, and produces
+  one-row-per-role CSV files.
 
 ## Run locally
 
@@ -90,8 +92,8 @@ checkpoint locally.
 All applications and Gmail review records remain in IndexedDB for the exact
 browser and site origin that created them. Clearing site data, changing browsers,
 or changing the production domain can make that data unavailable. Download a JSON
-backup regularly; JSON v3 includes the non-secret Gmail review/checkpoint data and
-can still restore older v2 backups. CSV is intended for analysis, not full
+backup regularly; JSON v4 includes optional actions, saved views, settings, and
+non-secret Gmail review/checkpoint data, and it still restores v2/v3 backups. CSV is intended for analysis, not full
 restoration.
 
 The v2 storage upgrade intentionally clears legacy aggregate entries while

@@ -5,6 +5,7 @@ import {
   createProcessedGmailMessage,
   emptyGmailImportData,
 } from './gmail'
+import { normalizeSettings } from './settings'
 import { getDisplayStatus, statusLabel, todayDate } from './status'
 import type { ApplicationEntry, ApplicationInput, AppSettings, GmailImportData, TrackerBackup } from './types'
 
@@ -31,7 +32,7 @@ export function buildBackup(
   const exportedAt = typeof gmailOrExportedAt === 'string'
     ? gmailOrExportedAt
     : maybeExportedAt ?? new Date().toISOString()
-  return { version: 3, exportedAt, entries, settings, gmail }
+  return { version: 4, exportedAt, entries, settings: normalizeSettings(settings), gmail }
 }
 
 export function parseBackup(raw: string): TrackerBackup {
@@ -47,17 +48,17 @@ export function parseBackup(raw: string): TrackerBackup {
   }
 
   try {
-    if (!isRecord(data) || (data.version !== 2 && data.version !== 3)) throw new Error()
+    if (!isRecord(data) || ![2, 3, 4].includes(Number(data.version))) throw new Error()
     if (!Array.isArray(data.entries) || !validSettings(data.settings)) throw new Error()
     const entries = data.entries.map((candidate) => {
       if (!isRecord(candidate)) throw new Error()
       return createApplication(candidate as unknown as ApplicationInput)
     })
     return {
-      version: 3,
+      version: 4,
       exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : new Date().toISOString(),
       entries,
-      settings: data.settings,
+      settings: normalizeSettings(data.settings),
       gmail: data.version === 2 ? emptyGmailImportData() : validGmailImportData(data.gmail),
     }
   } catch {
@@ -68,7 +69,8 @@ export function parseBackup(raw: string): TrackerBackup {
 export function entriesToCsv(entries: ApplicationEntry[], today = todayDate()): string {
   const columns = [
     'id', 'company', 'title', 'submittedDate', 'effort', 'source', 'currentStatus',
-    'statusHistory', 'originProvider', 'originMessageId', 'url', 'resumeVariant', 'notes', 'updatedAt',
+    'statusHistory', 'originProvider', 'originMessageId', 'url', 'resumeVariant', 'nextAction',
+    'nextActionDueDate', 'nextActionCompleted', 'jobDescriptionExcerpt', 'notes', 'updatedAt',
   ]
   const rows = entries.map((entry) => {
     const values: unknown[] = [
@@ -84,6 +86,10 @@ export function entriesToCsv(entries: ApplicationEntry[], today = todayDate()): 
       entry.origin?.messageId,
       entry.url,
       entry.resumeVariant,
+      entry.nextAction,
+      entry.nextActionDueDate,
+      entry.nextActionCompleted,
+      entry.jobDescriptionExcerpt,
       entry.notes,
       entry.updatedAt,
     ]
@@ -106,7 +112,7 @@ function validSettings(value: unknown): value is AppSettings {
   if (!isRecord(value)) return false
   return Number.isInteger(value.weeklyTarget) && Number(value.weeklyTarget) >= 0 &&
     Array.isArray(value.sources) && value.sources.every((source) => typeof source === 'string') &&
-    (value.lastBackupAt === null || typeof value.lastBackupAt === 'string')
+    (value.lastBackupAt === null || value.lastBackupAt === undefined || typeof value.lastBackupAt === 'string')
 }
 
 function validGmailImportData(value: unknown): GmailImportData {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectApplicationConfirmation } from './detector'
+import { detectApplicationConfirmation, detectApplicationStatusUpdate } from './detector'
 import type { NormalizedGmailMessage } from './types'
 
 describe('application confirmation detection', () => {
@@ -49,6 +49,18 @@ describe('application confirmation detection', () => {
       subject: 'Application received',
       text: 'We received your application. Thank you for applying.',
     }))).toBeNull()
+  })
+})
+
+describe('application status detection', () => {
+  it.each([
+    ['Assessment invitation for Data Science Intern at Acme', 'Please complete the assessment by Friday.', 'online_assessment'],
+    ['Interview invitation for Data Science Intern at Acme', 'Choose a time to schedule your interview.', 'interview'],
+    ['Update on your application for Data Science Intern at Acme', 'Unfortunately, we will not be moving forward.', 'rejected'],
+  ])('detects %s', (subject, text, suggestedStatus) => {
+    expect(detectApplicationStatusUpdate(message({ from: 'Acme <jobs@acme.com>', subject, text }))).toEqual(expect.objectContaining({
+      company: 'Acme', title: 'Data Science Intern', suggestedStatus,
+    }))
   })
 })
 

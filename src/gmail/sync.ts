@@ -1,8 +1,8 @@
-import { createGmailCandidate, createProcessedGmailMessage } from '../domain/gmail'
+import { createGmailCandidate, createProcessedGmailMessage, matchGmailStatusToApplications } from '../domain/gmail'
 import type { GmailSyncState } from '../domain/types'
 import type { TrackerRepository } from '../storage/repository'
 import { GmailApiError, type GmailApiClient } from './api'
-import { detectApplicationConfirmation } from './detector'
+import { detectApplicationConfirmation, detectApplicationStatusUpdate } from './detector'
 import { normalizeGmailMessage } from './message'
 
 const INITIAL_DAYS = 30
@@ -69,6 +69,9 @@ export async function syncGmail({
     ...processed.filter((message) => message.disposition !== 'error').map((message) => message.messageId),
     ...candidates.map((candidate) => candidate.messageId),
     ...entries.flatMap((entry) => entry.origin?.provider === 'gmail' ? [entry.origin.messageId] : []),
+    ...entries.flatMap((entry) => entry.statusHistory.flatMap((event) =>
+      event.origin?.provider === 'gmail' ? [event.origin.messageId] : [],
+    )),
   ])
   const retryIds = processed.filter((message) => message.disposition === 'error').map((message) => message.messageId)
   const pendingIds = [...new Set([...messageIds, ...retryIds])].filter((id) => !knownIds.has(id))
@@ -76,13 +79,15 @@ export async function syncGmail({
     const raw = await api.getMessage(messageId)
     try {
       const message = normalizeGmailMessage(raw)
-      const detected = detectApplicationConfirmation(message)
-      if (!detected) {
+      const statusUpdate = detectApplicationStatusUpdate(message)
+      const confirmation = statusUpdate ? null : detectApplicationConfirmation(message)
+      if (!statusUpdate && !confirmation) {
         return {
           processed: createProcessedGmailMessage({ messageId, disposition: 'ignored', processedAt: syncedAt }),
         }
       }
-      const candidate = createGmailCandidate({
+      const detected = statusUpdate ?? confirmation!
+      const base = {
         messageId: message.id,
         threadId: message.threadId,
         receivedAt: message.receivedAt,
@@ -94,7 +99,21 @@ export async function syncGmail({
         confidence: detected.confidence,
         matchedRule: detected.matchedRule,
         createdAt: syncedAt,
-      })
+      }
+      const candidate = statusUpdate
+        ? createGmailCandidate({
+          ...base,
+          kind: 'status',
+          suggestedStatus: statusUpdate.suggestedStatus,
+          eventDate: localDate(message.receivedAt),
+          supportingSnippet: statusUpdate.supportingSnippet,
+          matchedEntryIds: matchGmailStatusToApplications({
+            company: statusUpdate.company,
+            title: statusUpdate.title,
+            sender: message.from,
+          }, entries),
+        })
+        : createGmailCandidate(base)
       return {
         candidate,
         processed: createProcessedGmailMessage({ messageId, disposition: 'candidate', processedAt: syncedAt }),

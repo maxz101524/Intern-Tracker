@@ -72,7 +72,8 @@ describe('singular application analytics', () => {
     const waiting = entry('waiting', '2026-09-01', 'quick', 'LinkedIn')
 
     expect(getOutcomeMetrics([progressed, waiting], '2026-09-04')).toMatchObject({
-      total: 2, responses: 1, interviews: 1, responseRate: 50, interviewRate: 50,
+      total: 2, responses: 1, anyResponse: 1, progressed: 1, rejected: 1,
+      interviews: 1, responseRate: 50, progressedRate: 50, rejectedRate: 50, interviewRate: 50,
     })
     expect(getEffortPerformance([progressed, waiting])).toEqual([
       expect.objectContaining({ effort: 'quick', total: 1, responses: 0 }),

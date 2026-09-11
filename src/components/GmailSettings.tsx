@@ -19,7 +19,7 @@ export function GmailSettings({ gmail }: { gmail: GmailImportController }) {
 
   return (
     <section className="settings-section gmail-settings" aria-busy={busy}>
-      <div className="settings-heading"><span className="settings-icon"><Mail size={20} /></span><div><h2>Gmail import</h2><p>Turn confirmation emails into a quick review queue.</p></div></div>
+      <div className="settings-heading"><span className="settings-icon"><Mail size={20} /></span><div><h2>Gmail import</h2><p>Review confirmations, assessments, interviews, and rejections.</p></div></div>
 
       {!configured ? (
         <div className="gmail-config-note"><AlertTriangle size={18} /><div><strong>Google OAuth client ID needed</strong><p>Add `VITE_GOOGLE_CLIENT_ID` to enable private, read-only Gmail access. Manual tracking remains fully available.</p></div></div>
@@ -48,7 +48,7 @@ export function GmailSettings({ gmail }: { gmail: GmailImportController }) {
       )}
 
       {(gmail.error || gmail.authState.error) && <p className="form-error" role="alert">{gmail.error || gmail.authState.error}</p>}
-      <p className="gmail-privacy">Paceboard reads confirmation messages in this browser. It stores only review fields and Gmail IDs—not access tokens or complete email bodies.</p>
+      <p className="gmail-privacy">Paceboard reads matching recruiting messages in this browser. It stores only review fields, a short supporting excerpt, and Gmail IDs—not access tokens or complete email bodies.</p>
 
       {gmail.gmailData.syncState.initialSyncCompleted && (
         <div className="gmail-reset">

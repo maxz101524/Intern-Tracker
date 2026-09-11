@@ -18,9 +18,17 @@ export type PipelineSummary = Record<DisplayStatus, number>
 export interface OutcomeMetrics {
   total: number
   active: number
+  awaitingResponse: number
+  inProgress: number
+  anyResponse: number
+  progressed: number
+  rejected: number
   responses: number
   interviews: number
   offers: number
+  anyResponseRate: number
+  progressedRate: number
+  rejectedRate: number
   responseRate: number
   interviewRate: number
 }
@@ -28,31 +36,43 @@ export interface OutcomeMetrics {
 export interface PerformanceRow {
   total: number
   responses: number
+  progressed: number
+  rejected: number
   interviews: number
   responseRate: number
+  progressedRate: number
+  rejectedRate: number
   interviewRate: number
 }
 
 export interface EffortPerformance extends PerformanceRow { effort: ApplicationEffort }
 export interface SourcePerformance extends PerformanceRow { source: string }
 
-export function getWeekSummary(entries: ApplicationEntry[], weeklyTarget: number, now: Date): WeekSummary {
+export function getWeekSummary(
+  entries: ApplicationEntry[],
+  weeklyTarget: number,
+  now: Date,
+  applicationDays: number[] = [1, 2, 3, 4, 5, 6, 0],
+): WeekSummary {
   const series = buildDailySeries(entries, now)
   const submitted = sum(series.map((day) => day.total))
   const quick = sum(series.map((day) => day.quick))
   const targeted = sum(series.map((day) => day.targeted))
   const target = Math.max(0, weeklyTarget)
   const remaining = Math.max(0, target - submitted)
-  const elapsedDays = ((now.getDay() + 6) % 7) + 1
-  const remainingDays = 8 - elapsedDays
-  const expectedByNow = Math.ceil((target * elapsedDays) / 7)
+  const scheduledDays = [...new Set(applicationDays)].filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+  const effectiveDays = scheduledDays.length ? scheduledDays : [1, 2, 3, 4, 5, 6, 0]
+  const week = Array.from({ length: 7 }, (_, index) => addDays(startOfMonday(now), index))
+  const elapsedDays = week.filter((date) => effectiveDays.includes(date.getDay()) && date <= now).length
+  const remainingDays = week.filter((date) => effectiveDays.includes(date.getDay()) && date >= new Date(now.getFullYear(), now.getMonth(), now.getDate())).length
+  const expectedByNow = Math.ceil((target * elapsedDays) / effectiveDays.length)
   return {
     submitted,
     quick,
     targeted,
     remaining,
     expectedByNow,
-    requiredDailyPace: remaining === 0 ? 0 : roundToOne(remaining / remainingDays),
+    requiredDailyPace: remaining === 0 ? 0 : roundToOne(remaining / Math.max(1, remainingDays)),
     isOnTrack: submitted >= expectedByNow,
   }
 }
@@ -111,18 +131,31 @@ export function getPipelineSummary(entries: ApplicationEntry[], today = todayDat
 
 export function getOutcomeMetrics(entries: ApplicationEntry[], today = todayDate()): OutcomeMetrics {
   const total = entries.length
-  const responses = entries.filter(hasResponse).length
+  const anyResponse = entries.filter(hasResponse).length
+  const progressed = entries.filter(hasProgressed).length
+  const rejected = entries.filter((entry) => getDisplayStatus(entry, today) === 'rejected').length
   const interviews = entries.filter(hasInterview).length
   const offers = entries.filter((entry) => entry.statusHistory.some(({ status }) => status === 'offer')).length
-  const activeStatuses: DisplayStatus[] = ['applied', 'no_response', 'online_assessment', 'recruiter_screen', 'interview']
-  const active = entries.filter((entry) => activeStatuses.includes(getDisplayStatus(entry, today))).length
+  const awaitingStatuses: DisplayStatus[] = ['applied', 'no_response']
+  const progressStatuses: DisplayStatus[] = ['online_assessment', 'recruiter_screen', 'interview']
+  const awaitingResponse = entries.filter((entry) => awaitingStatuses.includes(getDisplayStatus(entry, today))).length
+  const inProgress = entries.filter((entry) => progressStatuses.includes(getDisplayStatus(entry, today))).length
+  const active = awaitingResponse + inProgress
   return {
     total,
     active,
-    responses,
+    awaitingResponse,
+    inProgress,
+    anyResponse,
+    progressed,
+    rejected,
+    responses: anyResponse,
     interviews,
     offers,
-    responseRate: percent(responses, total),
+    anyResponseRate: percent(anyResponse, total),
+    progressedRate: percent(progressed, total),
+    rejectedRate: percent(rejected, total),
+    responseRate: percent(anyResponse, total),
     interviewRate: percent(interviews, total),
   }
 }
@@ -149,12 +182,30 @@ export function formatShortDate(value: string): string {
 function performance(entries: ApplicationEntry[]): PerformanceRow {
   const total = entries.length
   const responses = entries.filter(hasResponse).length
+  const progressed = entries.filter(hasProgressed).length
+  const rejected = entries.filter((entry) => getDisplayStatus(entry) === 'rejected').length
   const interviews = entries.filter(hasInterview).length
-  return { total, responses, interviews, responseRate: percent(responses, total), interviewRate: percent(interviews, total) }
+  return {
+    total,
+    responses,
+    progressed,
+    rejected,
+    interviews,
+    responseRate: percent(responses, total),
+    progressedRate: percent(progressed, total),
+    rejectedRate: percent(rejected, total),
+    interviewRate: percent(interviews, total),
+  }
 }
 
 function hasResponse(entry: ApplicationEntry): boolean {
   return entry.statusHistory.some(({ status }) => status !== 'applied' && status !== 'withdrawn')
+}
+
+function hasProgressed(entry: ApplicationEntry): boolean {
+  return entry.statusHistory.some(({ status }) =>
+    status === 'online_assessment' || status === 'recruiter_screen' || status === 'interview' || status === 'offer',
+  )
 }
 
 function hasInterview(entry: ApplicationEntry): boolean {

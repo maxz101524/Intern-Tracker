@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TrackerRepository } from '../storage/repository'
 import { TrackerRepository as Repository } from '../storage/repository'
+import { createApplication } from '../domain/entries'
 import { GmailApiError, type GmailApiClient } from './api'
 import { syncGmail } from './sync'
 import type { GmailApiMessage } from './types'
@@ -125,6 +126,30 @@ describe('Gmail synchronization', () => {
 
     await expect(syncGmail({ api, repository })).rejects.toThrow('Reconnect the Gmail account previously used by Paceboard.')
     expect(api.listHistoryMessageIds).not.toHaveBeenCalled()
+  })
+
+  it('creates a matched status suggestion for an assessment invitation', async () => {
+    const application = createApplication({
+      company: 'Acme', title: 'Data Science Intern', submittedDate: '2026-09-01', effort: 'quick',
+    })
+    await repository.saveEntry(application)
+    const api = fakeApi({
+      listInitialMessageIds: vi.fn().mockResolvedValue(['assessment-1']),
+      getMessage: vi.fn().mockResolvedValue(message(
+        'assessment-1',
+        'Assessment invitation for Data Science Intern at Acme',
+        'Please complete the assessment by Friday.',
+      )),
+    })
+
+    await syncGmail({ api, repository, now: new Date('2026-09-10T14:00:00.000Z') })
+
+    expect(await repository.listGmailCandidates('pending')).toEqual([
+      expect.objectContaining({
+        kind: 'status', suggestedStatus: 'online_assessment', eventDate: '2026-09-10',
+        matchedEntryIds: [application.id],
+      }),
+    ])
   })
 })
 

@@ -33,3 +33,8 @@ export interface DetectionResult {
   confidence: 'high' | 'medium'
   matchedRule: string
 }
+
+export interface StatusDetectionResult extends DetectionResult {
+  suggestedStatus: 'online_assessment' | 'interview' | 'rejected'
+  supportingSnippet: string
+}

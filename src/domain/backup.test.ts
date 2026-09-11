@@ -11,13 +11,16 @@ const settings: AppSettings = {
   lastBackupAt: null,
 }
 
-describe('backup and export v3', () => {
+describe('backup and export v4', () => {
   it('round-trips every application and its status history', () => {
     const application = appendStatus(createApplication({
       company: 'Acme',
       title: 'ML Intern',
       submittedDate: '2026-09-03',
       effort: 'targeted',
+      nextAction: 'Prepare for interview',
+      nextActionDueDate: '2026-09-22',
+      jobDescriptionExcerpt: 'Build reliable applied AI systems.',
     }), 'interview', '2026-09-20')
 
     const gmail = emptyGmailImportData()
@@ -25,9 +28,10 @@ describe('backup and export v3', () => {
     const restored = parseBackup(JSON.stringify(backup))
 
     expect(restored.entries).toEqual([application])
-    expect(restored.settings).toEqual(settings)
+    expect(restored.settings).toMatchObject(settings)
+    expect(restored.settings.resumeVariants).toContain('Applied AI')
     expect(restored.gmail).toEqual(gmail)
-    expect(restored.version).toBe(3)
+    expect(restored.version).toBe(4)
   })
 
   it('round-trips review candidates, processed IDs, and non-secret sync state', () => {
@@ -54,7 +58,7 @@ describe('backup and export v3', () => {
 
   it('normalizes version-2 backups with empty Gmail import data', () => {
     const v2 = { version: 2, exportedAt: '2026-09-10T14:00:00.000Z', entries: [], settings }
-    expect(parseBackup(JSON.stringify(v2))).toMatchObject({ version: 3, gmail: emptyGmailImportData() })
+    expect(parseBackup(JSON.stringify(v2))).toMatchObject({ version: 4, gmail: emptyGmailImportData() })
   })
 
   it('rejects version-1 aggregate backups with a specific message', () => {

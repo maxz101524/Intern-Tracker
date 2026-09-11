@@ -1,4 +1,4 @@
-import type { ApplicationEntry, ApplicationStatus, DisplayStatus, StatusEvent } from './types'
+import type { ApplicationEntry, ApplicationOrigin, ApplicationStatus, DisplayStatus, StatusEvent } from './types'
 
 export const NO_RESPONSE_DAYS = 21
 
@@ -35,6 +35,12 @@ export function parseLocalDate(value: string): Date {
   return new Date(year, month - 1, day)
 }
 
+export function startOfMondayDate(value = todayDate()): string {
+  const date = parseLocalDate(value)
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7))
+  return todayDate(date)
+}
+
 export function getCurrentStatus(entry: ApplicationEntry): ApplicationStatus {
   return entry.statusHistory.at(-1)?.status ?? 'applied'
 }
@@ -50,21 +56,66 @@ export function appendStatus(
   entry: ApplicationEntry,
   status: ApplicationStatus,
   date: string,
+  origin?: ApplicationOrigin,
 ): ApplicationEntry {
   if (!isApplicationStatus(status)) throw new Error('Application status is not valid.')
   if (!isValidDateOnly(date)) throw new Error('Status date is not valid.')
   if (date < entry.submittedDate) {
     throw new Error('Status date cannot be before the submission date.')
   }
+  if (origin && entry.statusHistory.some((event) => event.origin?.provider === origin.provider && event.origin.messageId === origin.messageId)) {
+    return entry
+  }
   if (getCurrentStatus(entry) === status) return entry
 
-  const nextEvent: StatusEvent = { id: crypto.randomUUID(), status, date }
+  const nextEvent: StatusEvent = origin
+    ? { id: crypto.randomUUID(), status, date, origin }
+    : { id: crypto.randomUUID(), status, date }
   const statusHistory = [...entry.statusHistory, nextEvent]
     .map((event, index) => ({ event, index }))
     .sort((a, b) => a.event.date.localeCompare(b.event.date) || a.index - b.index)
     .map(({ event }) => event)
 
   return { ...entry, statusHistory, updatedAt: new Date().toISOString() }
+}
+
+export function replaceStatusHistory(entry: ApplicationEntry, statusHistory: StatusEvent[]): ApplicationEntry {
+  if (statusHistory.length === 0) throw new Error('Status history is required.')
+  const normalized = statusHistory.map((event) => ({ ...event }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+  if (normalized[0].status !== 'applied' || normalized[0].date !== entry.submittedDate) {
+    throw new Error('Status history must begin with the submitted application.')
+  }
+  for (const event of normalized) {
+    if (!event.id || !isApplicationStatus(event.status) || !isValidDateOnly(event.date) || event.date < entry.submittedDate) {
+      throw new Error('Status history is not valid.')
+    }
+  }
+  return { ...entry, statusHistory: normalized, updatedAt: new Date().toISOString() }
+}
+
+export function completeNextAction(entry: ApplicationEntry, completedAt = new Date().toISOString()): ApplicationEntry {
+  if (!entry.nextAction) return entry
+  return { ...entry, nextActionCompleted: true, nextActionCompletedAt: completedAt, updatedAt: completedAt }
+}
+
+export function snoozeNextAction(entry: ApplicationEntry, days = 3, today = todayDate()): ApplicationEntry {
+  if (!entry.nextAction) return entry
+  const start = entry.nextActionDueDate && entry.nextActionDueDate > today ? entry.nextActionDueDate : today
+  const date = parseLocalDate(start)
+  date.setDate(date.getDate() + days)
+  return {
+    ...entry,
+    nextActionDueDate: todayDate(date),
+    nextActionCompleted: false,
+    nextActionCompletedAt: undefined,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+export function daysSinceUpdate(entry: ApplicationEntry, today = todayDate()): number {
+  const updated = todayDate(new Date(entry.updatedAt))
+  return Math.max(0, calendarDayNumber(today) - calendarDayNumber(updated))
 }
 
 export function statusLabel(status: DisplayStatus): string {

@@ -1,4 +1,4 @@
-import { isValidDateOnly } from './status'
+import { getCurrentStatus, isApplicationStatus, isValidDateOnly } from './status'
 import type {
   ApplicationEntry,
   GmailCandidate,
@@ -49,6 +49,19 @@ export function createGmailCandidate(input: GmailCandidateInput): GmailCandidate
     state,
     createdAt: iso(input.createdAt ?? new Date().toISOString(), 'Gmail candidate creation time is not valid.'),
   }
+  if (input.kind === 'status') {
+    candidate.kind = 'status'
+    if (!isApplicationStatus(input.suggestedStatus) || !isValidDateOnly(input.eventDate)) {
+      throw new Error('Gmail status suggestion is not valid.')
+    }
+    candidate.suggestedStatus = input.suggestedStatus
+    candidate.eventDate = input.eventDate
+    candidate.matchedEntryIds = Array.isArray(input.matchedEntryIds)
+      ? input.matchedEntryIds.filter((id): id is string => typeof id === 'string' && Boolean(id))
+      : []
+  }
+  if (input.supportingSnippet) candidate.supportingSnippet = input.supportingSnippet.trim()
+  if (input.linkedEntryId) candidate.linkedEntryId = input.linkedEntryId.trim()
   if (input.reviewedAt !== undefined) {
     candidate.reviewedAt = iso(input.reviewedAt, 'Gmail review time is not valid.')
   }
@@ -94,6 +107,22 @@ export function findPossibleDuplicate(
     if (distance <= 3) return { kind: 'near', entryId: entry.id }
   }
   return null
+}
+
+export function matchGmailStatusToApplications(
+  candidate: Pick<GmailCandidate, 'company' | 'title' | 'sender'>,
+  entries: ApplicationEntry[],
+): string[] {
+  const company = normalize(candidate.company)
+  const title = normalize(candidate.title)
+  const active = entries.filter((entry) => !['rejected', 'withdrawn'].includes(getCurrentStatus(entry)))
+  const exact = active.filter((entry) => normalize(entry.company) === company && title && normalize(entry.title) === title)
+  if (exact.length) return exact.map((entry) => entry.id)
+  const sameCompany = active.filter((entry) => normalize(entry.company) === company)
+  if (sameCompany.length) return sameCompany.map((entry) => entry.id)
+  const senderDomain = candidate.sender.match(/@([a-z0-9.-]+)>?/i)?.[1]?.split('.').at(-2)
+  if (!senderDomain) return []
+  return active.filter((entry) => normalize(entry.company).includes(normalize(senderDomain))).map((entry) => entry.id)
 }
 
 function required(value: string, message: string): string {

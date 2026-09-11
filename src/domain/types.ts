@@ -15,6 +15,7 @@ export interface StatusEvent {
   id: string
   status: ApplicationStatus
   date: string
+  origin?: ApplicationOrigin
 }
 
 export interface ApplicationOrigin {
@@ -32,6 +33,11 @@ export interface ApplicationEntry {
   url?: string
   resumeVariant?: string
   notes?: string
+  nextAction?: string
+  nextActionDueDate?: string
+  nextActionCompleted?: boolean
+  nextActionCompletedAt?: string
+  jobDescriptionExcerpt?: string
   origin?: ApplicationOrigin
   statusHistory: StatusEvent[]
   updatedAt: string
@@ -47,6 +53,33 @@ export interface AppSettings {
   weeklyTarget: number
   sources: string[]
   lastBackupAt: string | null
+  applicationDays?: number[]
+  resumeVariants?: string[]
+  visibleColumns?: ApplicationColumn[]
+  savedViews?: SavedApplicationView[]
+  changeCount?: number
+  lastBackupChangeCount?: number
+}
+
+export type ApplicationColumn = 'source' | 'effort' | 'resumeVariant' | 'nextAction' | 'daysSinceUpdate'
+
+export type ApplicationViewMetric = 'any_response' | 'progressed' | 'rejected' | 'awaiting_response' | 'in_progress'
+
+export interface ApplicationFilterState {
+  query: string
+  status: DisplayStatus | 'all'
+  effort: ApplicationEffort | 'all'
+  source: string
+  fromDate: string
+  toDate: string
+  metric?: ApplicationViewMetric
+  preset?: 'in_progress' | 'this_week' | 'awaiting_response'
+}
+
+export interface SavedApplicationView {
+  id: string
+  name: string
+  filters: ApplicationFilterState
 }
 
 export type GmailCandidateState = 'pending' | 'imported' | 'dismissed'
@@ -62,6 +95,12 @@ export interface GmailCandidate {
   title: string
   confidence: 'high' | 'medium'
   matchedRule: string
+  kind?: 'application' | 'status'
+  suggestedStatus?: ApplicationStatus
+  eventDate?: string
+  matchedEntryIds?: string[]
+  supportingSnippet?: string
+  linkedEntryId?: string
   state: GmailCandidateState
   createdAt: string
   reviewedAt?: string
@@ -88,7 +127,7 @@ export interface GmailImportData {
 }
 
 export interface TrackerBackup {
-  version: 3
+  version: 4
   exportedAt: string
   entries: ApplicationEntry[]
   settings: AppSettings

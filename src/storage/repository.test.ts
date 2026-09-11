@@ -75,6 +75,29 @@ describe('TrackerRepository v2', () => {
     expect(await repository.getGmailSyncState()).toEqual({ key: 'gmail', initialSyncCompleted: false })
   })
 
+  it('upgrades v3 browser data to v4 without changing applications and adds safe defaults', async () => {
+    const existing = createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-09', effort: 'targeted',
+    })
+    await repository.destroy()
+    const old = new Dexie(name)
+    old.version(3).stores({
+      entries: 'id, submittedDate, effort, source, company, updatedAt, origin.messageId',
+      settings: 'key',
+      gmailCandidates: 'messageId, state, submittedDate, createdAt',
+      processedGmailMessages: 'messageId, disposition, processedAt',
+      gmailSync: 'key',
+    })
+    await old.table('entries').put(existing)
+    await old.table('settings').put({ key: 'app', weeklyTarget: 35, sources: ['Company site'], lastBackupAt: null })
+    old.close()
+
+    repository = new TrackerRepository(name)
+    expect(await repository.listEntries()).toEqual([existing])
+    expect(await repository.getSettings()).toMatchObject({ weeklyTarget: 35, applicationDays: [1, 2, 3, 4, 5] })
+    expect((await repository.getSettings()).resumeVariants).toContain('Applied AI')
+  })
+
   it('persists Gmail candidates, processed messages, and sync state idempotently', async () => {
     const candidate = sampleCandidate()
     await repository.saveGmailCandidate(candidate)
@@ -146,6 +169,34 @@ describe('TrackerRepository v2', () => {
     expect(await repository.listEntries()).toEqual([application])
     expect(await repository.getSettings()).toMatchObject({ weeklyTarget: 40 })
     expect(await repository.getGmailImportData()).toEqual(emptyGmailImportData())
+  })
+
+  it('previews merge semantics by preserving current conflicts unless the backup is chosen', async () => {
+    const current = createApplication({
+      id: 'current', company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-09', effort: 'quick',
+    })
+    const incoming = createApplication({
+      id: 'backup', company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-09', effort: 'targeted',
+    })
+    await repository.saveEntry(current)
+    const settings = { weeklyTarget: 35, sources: ['Company site'], lastBackupAt: null }
+    const raw = JSON.stringify(buildBackup([incoming], settings))
+
+    await repository.restoreFromJson(raw, 'merge')
+    expect(await repository.listEntries()).toEqual([current])
+    await repository.restoreFromJson(raw, 'merge', { backup: 'backup' })
+    expect(await repository.listEntries()).toEqual([incoming])
+  })
+
+  it('tracks changes and resets the displayed count when a backup is marked', async () => {
+    await repository.saveSettings({ weeklyTarget: 35, sources: ['LinkedIn'], lastBackupAt: null })
+    await repository.saveEntry(createApplication({
+      company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-09', effort: 'quick',
+    }))
+    const before = await repository.getSettings()
+    expect(before.changeCount).toBe(2)
+    const after = await repository.markBackup('2026-09-10T18:00:00.000Z')
+    expect(after.lastBackupChangeCount).toBe(after.changeCount)
   })
 })
 

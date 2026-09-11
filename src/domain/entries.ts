@@ -10,6 +10,10 @@ export function createApplication(input: ApplicationInput): ApplicationEntry {
   }
 
   const statusHistory = normalizeHistory(input.statusHistory, input.submittedDate)
+  const nextAction = clean(input.nextAction)
+  const nextActionDueDate = clean(input.nextActionDueDate)
+  if (nextActionDueDate && !isValidDateOnly(nextActionDueDate)) throw new Error('Next-action due date is not valid.')
+  if (nextActionDueDate && !nextAction) throw new Error('Choose a next action before adding a due date.')
 
   return compact({
     id: input.id ?? crypto.randomUUID(),
@@ -21,6 +25,13 @@ export function createApplication(input: ApplicationInput): ApplicationEntry {
     url: clean(input.url),
     resumeVariant: clean(input.resumeVariant),
     notes: clean(input.notes),
+    nextAction,
+    nextActionDueDate,
+    nextActionCompleted: nextAction ? input.nextActionCompleted === true : undefined,
+    nextActionCompletedAt: nextAction && input.nextActionCompleted === true
+      ? normalizeIso(input.nextActionCompletedAt)
+      : undefined,
+    jobDescriptionExcerpt: clean(input.jobDescriptionExcerpt),
     origin: normalizeOrigin(input.origin),
     statusHistory,
     updatedAt: input.updatedAt ?? new Date().toISOString(),
@@ -47,7 +58,12 @@ function normalizeHistory(history: StatusEvent[] | undefined, submittedDate: str
     if (!isValidDateOnly(event.date) || event.date < submittedDate) {
       throw new Error('Status history is not valid.')
     }
-    return { id: event.id, status: event.status, date: event.date }
+    return compact({
+      id: event.id,
+      status: event.status,
+      date: event.date,
+      origin: normalizeOrigin(event.origin),
+    }) as StatusEvent
   })
 
   normalized.sort((a, b) => a.date.localeCompare(b.date))
@@ -66,6 +82,13 @@ function required(value: string, message: string): string {
 function clean(value?: string): string | undefined {
   const result = value?.trim()
   return result || undefined
+}
+
+function normalizeIso(value?: string): string {
+  if (!value) return new Date().toISOString()
+  const time = Date.parse(value)
+  if (!Number.isFinite(time)) throw new Error('Next-action completion time is not valid.')
+  return new Date(time).toISOString()
 }
 
 function compact<T extends Record<string, unknown>>(value: T): Partial<T> {

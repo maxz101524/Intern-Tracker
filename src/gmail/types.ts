@@ -35,6 +35,6 @@ export interface DetectionResult {
 }
 
 export interface StatusDetectionResult extends DetectionResult {
-  suggestedStatus: 'online_assessment' | 'interview' | 'rejected'
+  suggestedStatus: 'online_assessment' | 'recruiter_screen' | 'interview' | 'offer' | 'rejected'
   supportingSnippet: string
 }

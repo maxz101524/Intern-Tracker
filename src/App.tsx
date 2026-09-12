@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, BarChart3, BriefcaseBusiness, Gauge, Inbox, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react'
+import { AlertTriangle, BarChart3, BriefcaseBusiness, Inbox, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react'
 import { Analytics } from './components/Analytics'
 import { ApplicationDrawer } from './components/ApplicationDrawer'
 import { Applications, type ApplicationViewCommand } from './components/Applications'
@@ -185,8 +185,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
           <NavButton label="Analytics" active={page === 'analytics'} icon={<BarChart3 size={19} />} onClick={() => navigate('analytics')} />
           <NavButton label="Settings & data" active={page === 'settings'} icon={<SettingsIcon size={19} />} onClick={() => navigate('settings')} />
         </nav>
-        <div className="sidebar-note"><Gauge size={18} /><p><strong>Every role counts.</strong><span>Keep the history useful.</span></p></div>
-        <p className="local-note">Private · Stored in this browser</p>
+        <div className="sidebar-meta"><span>Local workspace</span><small>Saved in this browser</small></div>
       </aside>
 
       <main className="main-area">

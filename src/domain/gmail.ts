@@ -14,6 +14,7 @@ export interface GmailCandidateInput extends Omit<GmailCandidate, 'state' | 'cre
 }
 
 export type PossibleDuplicate = { kind: 'exact' | 'near'; entryId: string }
+export interface GmailApplicationMatch { entryId: string; score: number }
 
 export function emptyGmailImportData(): GmailImportData {
   return {
@@ -91,38 +92,61 @@ export function createGmailSyncState(input?: Partial<GmailSyncState>): GmailSync
   if (input?.lastSuccessfulSyncAt !== undefined) {
     state.lastSuccessfulSyncAt = iso(input.lastSuccessfulSyncAt, 'Gmail sync time is not valid.')
   }
+  if (input?.detectorVersion !== undefined) {
+    if (!Number.isInteger(input.detectorVersion) || input.detectorVersion < 1) throw new Error('Gmail detector version is not valid.')
+    state.detectorVersion = input.detectorVersion
+  }
   return state
 }
 
 export function findPossibleDuplicate(
   candidate: Pick<GmailCandidate, 'company' | 'title' | 'submittedDate'>,
-  entries: ApplicationEntry[],
+  entries: Array<Pick<ApplicationEntry, 'id' | 'company' | 'title' | 'submittedDate'>>,
 ): PossibleDuplicate | null {
-  const company = normalize(candidate.company)
-  const title = normalize(candidate.title)
-  for (const entry of entries) {
-    if (normalize(entry.company) !== company || normalize(entry.title) !== title) continue
-    const distance = Math.abs(dayNumber(entry.submittedDate) - dayNumber(candidate.submittedDate))
-    if (distance === 0) return { kind: 'exact', entryId: entry.id }
-    if (distance <= 3) return { kind: 'near', entryId: entry.id }
-  }
-  return null
+  const matches = entries.flatMap((entry) => {
+    const days = Math.abs(dayNumber(entry.submittedDate) - dayNumber(candidate.submittedDate))
+    const company = companySimilarity(candidate.company, entry.company)
+    const title = titleSimilarity(candidate.title, entry.title)
+    const score = company * .57 + title * .43
+    return days <= 14 && company >= .86 && title >= .76 && score >= .83
+      ? [{ entry, days, score }]
+      : []
+  }).sort((a, b) => b.score - a.score || a.days - b.days)
+  const best = matches[0]
+  if (!best) return null
+  const exact = best.days === 0 && normalizeCompany(best.entry.company) === normalizeCompany(candidate.company) &&
+    normalizeTitle(best.entry.title) === normalizeTitle(candidate.title)
+  return { kind: exact ? 'exact' : 'near', entryId: best.entry.id }
+}
+
+export function rankGmailApplicationMatches(
+  candidate: Pick<GmailCandidate, 'company' | 'title' | 'sender'>,
+  entries: ApplicationEntry[],
+): GmailApplicationMatch[] {
+  const senderCompany = senderDomainRoot(candidate.sender)
+  return entries.map((entry) => {
+    const company = Math.max(
+      companySimilarity(candidate.company, entry.company),
+      senderCompany ? companySimilarity(senderCompany, entry.company) * .9 : 0,
+    )
+    const title = isGenericTitle(candidate.title) ? .45 : titleSimilarity(candidate.title, entry.title)
+    const score = company * .64 + title * .36
+    return { entryId: entry.id, score }
+  }).sort((a, b) => b.score - a.score)
 }
 
 export function matchGmailStatusToApplications(
   candidate: Pick<GmailCandidate, 'company' | 'title' | 'sender'>,
   entries: ApplicationEntry[],
 ): string[] {
-  const company = normalize(candidate.company)
-  const title = normalize(candidate.title)
   const active = entries.filter((entry) => !['rejected', 'withdrawn'].includes(getCurrentStatus(entry)))
-  const exact = active.filter((entry) => normalize(entry.company) === company && title && normalize(entry.title) === title)
-  if (exact.length) return exact.map((entry) => entry.id)
-  const sameCompany = active.filter((entry) => normalize(entry.company) === company)
-  if (sameCompany.length) return sameCompany.map((entry) => entry.id)
-  const senderDomain = candidate.sender.match(/@([a-z0-9.-]+)>?/i)?.[1]?.split('.').at(-2)
-  if (!senderDomain) return []
-  return active.filter((entry) => normalize(entry.company).includes(normalize(senderDomain))).map((entry) => entry.id)
+  const ranked = rankGmailApplicationMatches(candidate, active)
+  const strong = ranked.filter((match) => match.score >= .72)
+  if (strong.length === 1 || (strong.length > 1 && strong[0].score - strong[1].score >= .16)) return [strong[0].entryId]
+  if (strong.length) return strong.slice(0, 6).map((match) => match.entryId)
+
+  const sameCompany = active.filter((entry) => companySimilarity(candidate.company, entry.company) >= .9)
+  return sameCompany.length === 1 ? [sameCompany[0].id] : []
 }
 
 function required(value: string, message: string): string {
@@ -137,8 +161,67 @@ function iso(value: string, message: string): string {
   return new Date(time).toISOString()
 }
 
-function normalize(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '')
+function companySimilarity(left: string, right: string): number {
+  const a = normalizeCompany(left)
+  const b = normalizeCompany(right)
+  if (!a || !b) return 0
+  if (a === b) return 1
+  if ((a.includes(b) || b.includes(a)) && Math.min(a.length, b.length) >= 4) return .93
+  return tokenSimilarity(companyTokens(left), companyTokens(right))
+}
+
+function titleSimilarity(left: string, right: string): number {
+  const a = normalizeTitle(left)
+  const b = normalizeTitle(right)
+  if (!a || !b) return 0
+  if (a === b) return 1
+  return tokenSimilarity(titleTokens(left), titleTokens(right))
+}
+
+function normalizeCompany(value: string): string {
+  return companyTokens(value).join('')
+}
+
+function normalizeTitle(value: string): string {
+  return titleTokens(value).join('')
+}
+
+function companyTokens(value: string): string[] {
+  const ignored = new Set(['inc', 'incorporated', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'company', 'co', 'plc', 'holdings'])
+  return rawTokens(value).filter((token) => !ignored.has(token))
+}
+
+function titleTokens(value: string): string[] {
+  const ignored = new Set(['job', 'role', 'position', 'summer', 'fall', 'spring', '2025', '2026', '2027', '2028', 'internship', 'intern'])
+  return rawTokens(value).map((token) => ({
+    engineering: 'engineer', engineered: 'engineer', sciences: 'science', analytical: 'analytics',
+    artificial: 'ai', intelligence: 'ai', machine: 'ml', learning: 'ml',
+  })[token] ?? token).filter((token) => !ignored.has(token))
+}
+
+function rawTokens(value: string): string[] {
+  return value.toLowerCase().replace(/['’]s\b/g, 's').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean)
+}
+
+function tokenSimilarity(left: string[], right: string[]): number {
+  if (!left.length || !right.length) return 0
+  const a = new Set(left)
+  const b = new Set(right)
+  const intersection = [...a].filter((token) => b.has(token)).length
+  return (2 * intersection) / (a.size + b.size)
+}
+
+function isGenericTitle(value: string): boolean {
+  return /^(?:application )?(?:status )?update$/i.test(value.trim())
+}
+
+function senderDomainRoot(sender: string): string | null {
+  const domain = sender.match(/@([a-z0-9.-]+)>?/i)?.[1]
+  if (!domain) return null
+  const root = domain.split('.').at(-2)
+  return root && !/^(?:workday|greenhouse|lever|ashbyhq|smartrecruiters|icims|ripplematch|oraclecloud)$/.test(root)
+    ? root
+    : null
 }
 
 function dayNumber(value: string): number {

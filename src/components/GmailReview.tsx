@@ -1,6 +1,6 @@
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ExternalLink, Inbox, Link2, MailCheck, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ExternalLink, Inbox, Link2, MailCheck, RotateCcw, Search, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { findPossibleDuplicate } from '../domain/gmail'
+import { findPossibleDuplicate, rankGmailApplicationMatches } from '../domain/gmail'
 import { getDisplayStatus, statusLabel } from '../domain/status'
 import type { ApplicationEffort, ApplicationEntry, ApplicationStatus, GmailCandidate } from '../domain/types'
 import type { GmailReviewInput, GmailStatusReviewInput } from '../hooks/useGmailImport'
@@ -89,7 +89,7 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
   onDismiss: GmailReviewProps['onDismiss']
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const defaultMatches = candidate.matchedEntryIds ?? []
+  const defaultMatches = useMemo(() => candidate.matchedEntryIds ?? [], [candidate.matchedEntryIds])
   const [draft, setDraftState] = useState<ReviewDraft>(() => storedDraft ?? {
     company: candidate.company,
     title: candidate.title,
@@ -102,9 +102,27 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [matchQuery, setMatchQuery] = useState('')
   const duplicate = useMemo(() => candidate.kind === 'status' ? null : findPossibleDuplicate({ ...candidate, company: draft.company, title: draft.title, submittedDate: draft.submittedDate }, entries), [candidate, draft.company, draft.submittedDate, draft.title, entries])
   const duplicateEntry = entries.find((entry) => entry.id === duplicate?.entryId)
-  const matchOptions = defaultMatches.length ? entries.filter((entry) => defaultMatches.includes(entry.id)) : entries
+  const matchOptions = useMemo(() => {
+    const scores = new Map(rankGmailApplicationMatches(candidate, entries).map((match) => [match.entryId, match.score]))
+    const recommended = new Map(defaultMatches.map((id, position) => [id, position]))
+    const query = matchQuery.toLowerCase().trim()
+    return entries
+      .filter((entry) => !query || `${entry.company} ${entry.title} ${entry.submittedDate}`.toLowerCase().includes(query))
+      .sort((left, right) => {
+        const leftRecommended = recommended.get(left.id)
+        const rightRecommended = recommended.get(right.id)
+        if (leftRecommended !== undefined || rightRecommended !== undefined) {
+          if (leftRecommended === undefined) return 1
+          if (rightRecommended === undefined) return -1
+          return leftRecommended - rightRecommended
+        }
+        return (scores.get(right.id) ?? 0) - (scores.get(left.id) ?? 0) || right.submittedDate.localeCompare(left.submittedDate)
+      })
+      .slice(0, query ? 20 : 8)
+  }, [candidate, defaultMatches, entries, matchQuery])
   const selectedEntry = entries.find((entry) => entry.id === draft.entryId)
 
   useEffect(() => { headingRef.current?.focus() }, [])
@@ -145,9 +163,9 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
       <form onSubmit={submit}>
         {candidate.kind === 'status' ? <>
           <div className="suggestion-route"><span>Existing application</span>{selectedEntry ? <button type="button" className="matched-application" onClick={() => patchDraft({ editing: true })}><strong>{selectedEntry.company}</strong><span>{selectedEntry.title}</span><StatusBadge status={getDisplayStatus(selectedEntry)} /></button> : <p className="duplicate-warning"><AlertTriangle size={17} />Choose the application this email belongs to.</p>}</div>
-          {(draft.editing || defaultMatches.length !== 1) && <label>Application<select required aria-label="Application for Gmail suggestion" value={draft.entryId} onChange={(event) => patchDraft({ entryId: event.target.value })}><option value="">Choose application…</option>{matchOptions.map((entry) => <option key={entry.id} value={entry.id}>{entry.company} — {entry.title} ({entry.submittedDate})</option>)}</select></label>}
+          {(draft.editing || defaultMatches.length !== 1) && <ApplicationPicker entries={matchOptions} recommendedIds={defaultMatches} selectedId={draft.entryId} query={matchQuery} onQuery={setMatchQuery} onSelect={(entryId) => patchDraft({ entryId })} />}
           <div className="suggested-change"><span>Suggested change</span><strong>{statusLabel(draft.status)}</strong><time dateTime={draft.eventDate}>{draft.eventDate}</time></div>
-          {draft.editing && <div className="two-fields"><label>Status<select value={draft.status} onChange={(event) => patchDraft({ status: event.target.value as ApplicationStatus })}><option value="online_assessment">Online assessment</option><option value="interview">Interview</option><option value="rejected">Rejected</option></select></label><label>Event date<input type="date" min={selectedEntry?.submittedDate} value={draft.eventDate} onChange={(event) => patchDraft({ eventDate: event.target.value })} /></label></div>}
+          {draft.editing && <div className="two-fields"><label>Status<select value={draft.status} onChange={(event) => patchDraft({ status: event.target.value as ApplicationStatus })}><option value="online_assessment">Online assessment</option><option value="recruiter_screen">Recruiter screen</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option></select></label><label>Event date<input type="date" min={selectedEntry?.submittedDate} value={draft.eventDate} onChange={(event) => patchDraft({ eventDate: event.target.value })} /></label></div>}
         </> : <>
           <div className="two-fields"><label>Company<input required value={draft.company} onChange={(event) => patchDraft({ company: event.target.value })} autoComplete="organization" /></label><label>Role title<input required value={draft.title} onChange={(event) => patchDraft({ title: event.target.value })} /></label></div>
           <label className="review-date">Submitted<input required type="date" value={draft.submittedDate} onChange={(event) => patchDraft({ submittedDate: event.target.value })} /></label>
@@ -165,6 +183,29 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
       </form>
     </section>
   )
+}
+
+function ApplicationPicker({ entries, recommendedIds, selectedId, query, onQuery, onSelect }: {
+  entries: ApplicationEntry[]
+  recommendedIds: string[]
+  selectedId: string
+  query: string
+  onQuery: (value: string) => void
+  onSelect: (entryId: string) => void
+}) {
+  return <div className="application-picker">
+    <div className="picker-heading"><span>Match to an application</span>{recommendedIds.length > 0 && <small>{recommendedIds.length} recommended</small>}</div>
+    <label className="application-search"><Search size={16} /><span className="sr-only">Search applications</span><input type="search" aria-label="Search applications" placeholder="Search company or role" value={query} onChange={(event) => onQuery(event.target.value)} /></label>
+    <div className="application-picker-list" role="listbox" aria-label="Application for Gmail suggestion">
+      {entries.length ? entries.map((entry) => {
+        const recommended = recommendedIds.includes(entry.id)
+        return <button key={entry.id} type="button" role="option" aria-selected={selectedId === entry.id} className={selectedId === entry.id ? 'selected' : ''} onClick={() => onSelect(entry.id)}>
+          <span><strong>{entry.company}</strong><small>{entry.title}</small></span>
+          <span>{recommended && <em>Recommended</em>}<time dateTime={entry.submittedDate}>{entry.submittedDate}</time></span>
+        </button>
+      }) : <p>No applications match this search.</p>}
+    </div>
+  </div>
 }
 
 function DismissedList({ candidates, onRestore }: { candidates: GmailCandidate[]; onRestore: (candidate: GmailCandidate) => Promise<void> }) {

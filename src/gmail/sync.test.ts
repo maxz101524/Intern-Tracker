@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TrackerRepository } from '../storage/repository'
 import { TrackerRepository as Repository } from '../storage/repository'
 import { createApplication } from '../domain/entries'
+import { createGmailCandidate } from '../domain/gmail'
 import { GmailApiError, type GmailApiClient } from './api'
 import { syncGmail } from './sync'
 import type { GmailApiMessage } from './types'
@@ -37,7 +38,7 @@ describe('Gmail synchronization', () => {
     ])
     expect(await repository.getGmailSyncState()).toEqual({
       key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
-      lastSuccessfulSyncAt: '2026-09-10T14:00:00.000Z', initialSyncCompleted: true,
+      lastSuccessfulSyncAt: '2026-09-10T14:00:00.000Z', initialSyncCompleted: true, detectorVersion: 2,
     })
   })
 
@@ -150,6 +151,71 @@ describe('Gmail synchronization', () => {
         matchedEntryIds: [application.id],
       }),
     ])
+  })
+
+  it('skips a confirmation that confidently duplicates a manually added application', async () => {
+    await repository.saveEntry(createApplication({
+      company: "DICK'S Sporting Goods, Inc.", title: 'Data Analytics & Engineering - Summer 2027 Internship', submittedDate: '2026-09-10', effort: 'quick',
+    }))
+    const api = fakeApi({
+      listInitialMessageIds: vi.fn().mockResolvedValue(['duplicate-manual']),
+      getMessage: vi.fn().mockResolvedValue(message(
+        'duplicate-manual', 'Application received',
+        "We received your application for the Data Analytics & Engineering Internship at Dicks Sporting Goods.",
+      )),
+    })
+
+    const result = await syncGmail({ api, repository, now: new Date('2026-09-08T14:00:00.000Z') })
+
+    expect(result.newCandidates).toBe(0)
+    expect(await repository.listGmailCandidates('pending')).toEqual([])
+    expect(await repository.listProcessedGmailMessages()).toEqual([
+      expect.objectContaining({ messageId: 'duplicate-manual', disposition: 'ignored' }),
+    ])
+  })
+
+  it('reprocesses old pending matches once after detector rules improve', async () => {
+    await repository.saveGmailSyncState({
+      key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
+      lastSuccessfulSyncAt: '2026-09-09T12:00:00.000Z', initialSyncCompleted: true,
+    })
+    const oldCandidate = createGmailCandidate({
+      messageId: 'old-false-positive', threadId: 'thread-old', receivedAt: '2026-09-09T13:30:00.000Z', submittedDate: '2026-09-09',
+      sender: 'Oracle Recruiting <sender@workflow.email.us-phoenix-1.ocs.oraclecloud.com>',
+      subject: 'Continue to apply for the job AI Intern', company: 'Oraclecloud', title: 'AI Intern',
+      confidence: 'medium', matchedRule: 'oracle-confirmation',
+    })
+    await repository.saveGmailCandidate(oldCandidate)
+    await repository.saveProcessedGmailMessage({
+      messageId: oldCandidate.messageId, disposition: 'candidate', processedAt: '2026-09-09T14:00:00.000Z',
+    })
+    const api = fakeApi({
+      listHistoryMessageIds: vi.fn().mockResolvedValue({ messageIds: [], historyId: '520' }),
+      getMessage: vi.fn().mockResolvedValue(message(
+        oldCandidate.messageId, oldCandidate.subject, 'Thank you for your interest. Continue your application to be considered.',
+      )),
+    })
+
+    await syncGmail({ api, repository, now: new Date('2026-09-10T14:00:00.000Z') })
+
+    expect(api.getMessage).toHaveBeenCalledWith(oldCandidate.messageId)
+    expect(await repository.listGmailCandidates('pending')).toEqual([])
+    expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 2, historyId: '520' })
+  })
+
+  it('queues only one review item when Gmail sends duplicate confirmations', async () => {
+    const api = fakeApi({
+      listInitialMessageIds: vi.fn().mockResolvedValue(['confirmation-1', 'confirmation-2']),
+      getMessage: vi.fn()
+        .mockResolvedValueOnce(message('confirmation-1', 'Application received', 'We received your application for the ML Intern position at Acme.'))
+        .mockResolvedValueOnce(message('confirmation-2', 'Application confirmation', 'Thank you for applying to the ML Intern role at Acme.')),
+    })
+
+    const result = await syncGmail({ api, repository, now: new Date('2026-09-10T14:00:00.000Z') })
+
+    expect(result.newCandidates).toBe(1)
+    expect(await repository.listGmailCandidates('pending')).toHaveLength(1)
+    expect((await repository.listProcessedGmailMessages()).map((item) => item.disposition).sort()).toEqual(['candidate', 'ignored'])
   })
 })
 

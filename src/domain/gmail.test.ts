@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createApplication } from './entries'
-import { createGmailCandidate, findPossibleDuplicate } from './gmail'
+import { createGmailCandidate, findPossibleDuplicate, matchGmailStatusToApplications } from './gmail'
 
 describe('Gmail import domain rules', () => {
   it('normalizes a pending review candidate', () => {
@@ -53,7 +53,18 @@ describe('Gmail import domain rules', () => {
     expect(findPossibleDuplicate(candidate, [existing])).toEqual({ kind: 'exact', entryId: existing.id })
     expect(findPossibleDuplicate({ ...candidate, submittedDate: '2026-09-12' }, [existing]))
       .toEqual({ kind: 'near', entryId: existing.id })
-    expect(findPossibleDuplicate({ ...candidate, submittedDate: '2026-09-15' }, [existing])).toBeNull()
+    expect(findPossibleDuplicate({ ...candidate, submittedDate: '2026-09-15' }, [existing]))
+      .toEqual({ kind: 'near', entryId: existing.id })
+    expect(findPossibleDuplicate({ ...candidate, submittedDate: '2026-09-25' }, [existing])).toBeNull()
     expect(findPossibleDuplicate({ ...candidate, title: 'Software Intern' }, [existing])).toBeNull()
+  })
+
+  it('matches company aliases and normalized role titles to one existing application', () => {
+    const entry = createApplication({
+      company: 'Daikin Comfort Technologies, Inc.', title: 'Data Engineering Intern', submittedDate: '2026-09-08', effort: 'quick',
+    })
+    expect(matchGmailStatusToApplications({
+      company: 'Daikin', title: 'Data Engineering Intern, Summer 2027', sender: 'notifications@ripplematch.com',
+    }, [entry])).toEqual([entry.id])
   })
 })

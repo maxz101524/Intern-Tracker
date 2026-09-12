@@ -314,6 +314,29 @@ describe('Paceboard v2 app', () => {
     expect(await repository.getGmailCandidate('status-1')).toMatchObject({ state: 'imported', linkedEntryId: application.id })
   })
 
+  it('searches a long application list when a status email has multiple possible matches', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const alpha = createApplication({ company: 'Alpha Labs', title: 'Data Intern', submittedDate: '2026-09-01', effort: 'quick' })
+    const beta = createApplication({ company: 'Beta Systems', title: 'ML Intern', submittedDate: '2026-09-02', effort: 'quick' })
+    await repository.saveEntries([alpha, beta])
+    await repository.saveGmailCandidate(createGmailCandidate({
+      messageId: 'status-search', threadId: 'thread-status-search', receivedAt: '2026-09-10T13:30:00.000Z', submittedDate: '2026-09-10',
+      sender: 'Platform <notifications@ripplematch.com>', subject: 'Application update', company: 'Platform', title: 'Application update',
+      confidence: 'medium', matchedRule: 'generic-rejected', kind: 'status', suggestedStatus: 'rejected',
+      eventDate: '2026-09-10', matchedEntryIds: [alpha.id, beta.id], supportingSnippet: 'We will not be moving forward.',
+    }))
+    render(<App repository={repository} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Review, 1 pending' }))
+    await user.type(screen.getByRole('searchbox', { name: 'Search applications' }), 'Beta')
+    await user.click(screen.getByRole('option', { name: /Beta Systems/ }))
+    await user.click(screen.getByRole('button', { name: 'Accept' }))
+
+    await waitFor(async () => expect((await repository.listEntries()).find((entry) => entry.id === beta.id)?.statusHistory.at(-1)?.status).toBe('rejected'))
+    expect((await repository.listEntries()).find((entry) => entry.id === alpha.id)?.statusHistory).toHaveLength(1)
+  })
+
   it('links a duplicate confirmation to the existing application without adding another', async () => {
     const user = userEvent.setup()
     await readyRepository(repository)

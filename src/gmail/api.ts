@@ -1,7 +1,7 @@
 import type { GmailApiMessage } from './types'
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me'
-const INITIAL_QUERY = '{"thank you for applying" "received your application" "application received" "application confirmation" "successfully applied" assessment interview unfortunately "not moving forward"}'
+const INITIAL_QUERY = '{"your application" "application update" "application confirmation" "thank you for applying" "received your application" "successfully applied" assessment hackerrank codesignal codility interview "phone screen" unfortunately "not moving forward" "not selected" "regret to inform" "job offer"}'
 
 export type GmailApiErrorCode = 'authorization' | 'history-expired' | 'rate-limited' | 'unavailable' | 'request-failed'
 

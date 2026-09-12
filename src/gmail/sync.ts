@@ -1,4 +1,4 @@
-import { createGmailCandidate, createProcessedGmailMessage, matchGmailStatusToApplications } from '../domain/gmail'
+import { createGmailCandidate, createProcessedGmailMessage, findPossibleDuplicate, matchGmailStatusToApplications } from '../domain/gmail'
 import type { GmailSyncState } from '../domain/types'
 import type { TrackerRepository } from '../storage/repository'
 import { GmailApiError, type GmailApiClient } from './api'
@@ -9,6 +9,7 @@ const INITIAL_DAYS = 30
 const RECOVERY_DAYS = 2
 const DAY_MS = 86_400_000
 const MESSAGE_CONCURRENCY = 5
+const DETECTOR_VERSION = 2
 
 export type GmailSyncMode = 'initial' | 'incremental' | 'recovery'
 
@@ -65,6 +66,9 @@ export async function syncGmail({
     }
   }
 
+  const refreshCandidateIds = (previous.detectorVersion ?? 1) < DETECTOR_VERSION
+    ? new Set(candidates.filter((candidate) => candidate.state === 'pending').map((candidate) => candidate.messageId))
+    : new Set<string>()
   const knownIds = new Set([
     ...processed.filter((message) => message.disposition !== 'error').map((message) => message.messageId),
     ...candidates.map((candidate) => candidate.messageId),
@@ -73,8 +77,9 @@ export async function syncGmail({
       event.origin?.provider === 'gmail' ? [event.origin.messageId] : [],
     )),
   ])
+  for (const messageId of refreshCandidateIds) knownIds.delete(messageId)
   const retryIds = processed.filter((message) => message.disposition === 'error').map((message) => message.messageId)
-  const pendingIds = [...new Set([...messageIds, ...retryIds])].filter((id) => !knownIds.has(id))
+  const pendingIds = [...new Set([...messageIds, ...retryIds, ...refreshCandidateIds])].filter((id) => !knownIds.has(id))
   const outcomes = await mapWithConcurrency(pendingIds, MESSAGE_CONCURRENCY, async (messageId) => {
     const raw = await api.getMessage(messageId)
     try {
@@ -99,6 +104,15 @@ export async function syncGmail({
         confidence: detected.confidence,
         matchedRule: detected.matchedRule,
         createdAt: syncedAt,
+      }
+      if (!statusUpdate && findPossibleDuplicate({
+        company: detected.company,
+        title: detected.title,
+        submittedDate: localDate(message.receivedAt),
+      }, entries)?.kind === 'exact') {
+        return {
+          processed: createProcessedGmailMessage({ messageId, disposition: 'ignored', processedAt: syncedAt }),
+        }
       }
       const candidate = statusUpdate
         ? createGmailCandidate({
@@ -131,12 +145,35 @@ export async function syncGmail({
     historyId,
     lastSuccessfulSyncAt: syncedAt,
     initialSyncCompleted: true,
+    detectorVersion: DETECTOR_VERSION,
   }
-  const newCandidates = outcomes.flatMap((outcome) => outcome.candidate ? [outcome.candidate] : [])
+  const existingReviewApplications = candidates
+    .filter((candidate) => candidate.state === 'pending' && candidate.kind !== 'status' && !refreshCandidateIds.has(candidate.messageId))
+    .map((candidate) => ({ id: candidate.messageId, company: candidate.company, title: candidate.title, submittedDate: candidate.submittedDate }))
+  const newCandidates: ReturnType<typeof createGmailCandidate>[] = []
+  const processedMessages = outcomes.map((outcome) => {
+    if (!outcome.candidate) return outcome.processed
+    if (outcome.candidate.kind !== 'status') {
+      const proposedThisSync = newCandidates
+        .filter((candidate) => candidate.kind !== 'status')
+        .map((candidate) => ({ id: candidate.messageId, company: candidate.company, title: candidate.title, submittedDate: candidate.submittedDate }))
+      const duplicate = findPossibleDuplicate(outcome.candidate, [...existingReviewApplications, ...proposedThisSync])
+      if (duplicate?.kind === 'exact') {
+        return createProcessedGmailMessage({
+          messageId: outcome.candidate.messageId,
+          disposition: 'ignored',
+          processedAt: syncedAt,
+        })
+      }
+    }
+    newCandidates.push(outcome.candidate)
+    return outcome.processed
+  })
   await repository.commitGmailSync({
     candidates: newCandidates,
-    processedMessages: outcomes.map((outcome) => outcome.processed),
+    processedMessages,
     syncState: nextState,
+    removedCandidateIds: [...refreshCandidateIds].filter((messageId) => !newCandidates.some((candidate) => candidate.messageId === messageId)),
   })
 
   return {

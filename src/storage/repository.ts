@@ -27,6 +27,7 @@ export interface GmailSyncCommit {
   candidates: GmailCandidate[]
   processedMessages: ProcessedGmailMessage[]
   syncState: GmailSyncState
+  removedCandidateIds?: string[]
 }
 
 export interface GmailCandidateReview {
@@ -175,6 +176,7 @@ export class TrackerRepository {
       this.db.gmailSync,
       this.db.settings,
       async () => {
+        if (result.removedCandidateIds?.length) await this.db.gmailCandidates.bulkDelete(result.removedCandidateIds)
         await this.db.gmailCandidates.bulkPut(result.candidates)
         await this.db.processedGmailMessages.bulkPut(result.processedMessages)
         await this.db.gmailSync.put(result.syncState)

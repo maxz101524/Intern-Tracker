@@ -118,6 +118,7 @@ export interface GmailSyncState {
   historyId?: string
   lastSuccessfulSyncAt?: string
   initialSyncCompleted: boolean
+  detectorVersion?: number
 }
 
 export interface GmailImportData {

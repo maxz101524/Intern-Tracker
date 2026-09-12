@@ -26,7 +26,7 @@ describe('application confirmation detection', () => {
       subject: 'We received your application',
       text: 'Thank you for your application. Job Title: Machine Learning Intern',
     }))).toEqual(expect.objectContaining({
-      company: 'Northstar Recruiting',
+      company: 'Northstar',
       title: 'Machine Learning Intern',
       confidence: 'medium',
     }))
@@ -50,6 +50,17 @@ describe('application confirmation detection', () => {
       text: 'We received your application. Thank you for applying.',
     }))).toBeNull()
   })
+
+  it.each([
+    ['Continue to apply for the job Intern–AI and Data Solutions', 'Thank you for your interest. Continue your application to be considered.'],
+    ['Verify your email address', 'Thank you for your interest. Use this verification link to confirm your email.'],
+    ['Application incomplete', 'We received your profile, but your application is still incomplete.'],
+  ])('ignores unfinished or verification mail: %s', (subject, text) => {
+    expect(detectApplicationConfirmation(message({
+      from: 'Oracle Recruiting <sender@workflow.email.us-phoenix-1.ocs.oraclecloud.com>', subject, text,
+    }))).toBeNull()
+    expect(detectApplicationStatusUpdate(message({ subject, text }))).toBeNull()
+  })
 })
 
 describe('application status detection', () => {
@@ -61,6 +72,30 @@ describe('application status detection', () => {
     expect(detectApplicationStatusUpdate(message({ from: 'Acme <jobs@acme.com>', subject, text }))).toEqual(expect.objectContaining({
       company: 'Acme', title: 'Data Science Intern', suggestedStatus,
     }))
+  })
+
+  it('extracts a RippleMatch rejection instead of treating its body as a new application', () => {
+    const result = detectApplicationStatusUpdate(message({
+      from: 'RippleMatch Notifications <notifications@ripplematch.com>',
+      subject: 'An update from Daikin Comfort Technologies',
+      text: 'At this time, they have decided not to move forward with your application for the Data Engineering Intern, Summer 2027 role with Daikin.',
+    }))
+    expect(result).toEqual(expect.objectContaining({
+      company: 'Daikin', title: 'Data Engineering Intern, Summer 2027', suggestedStatus: 'rejected', confidence: 'high',
+    }))
+    expect(detectApplicationConfirmation(message({
+      from: 'RippleMatch Notifications <notifications@ripplematch.com>',
+      subject: 'An update from Daikin Comfort Technologies',
+      text: 'Thank you for your interest. At this time, they have decided not to move forward with your application for the Data Engineering Intern role with Daikin.',
+    }))).toBeNull()
+  })
+
+  it.each([
+    ['Schedule a recruiter screen for Data Intern at Acme', 'Select a time for your recruiter screen.', 'recruiter_screen'],
+    ['Your job offer for Data Intern at Acme', 'We are pleased to offer you the role.', 'offer'],
+  ])('detects the broader hiring funnel: %s', (subject, text, suggestedStatus) => {
+    expect(detectApplicationStatusUpdate(message({ from: 'Acme <jobs@acme.com>', subject, text })))
+      .toEqual(expect.objectContaining({ suggestedStatus }))
   })
 })
 

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { createApplication } from './domain/entries'
 import { createGmailCandidate } from './domain/gmail'
-import type { GmailApiClient } from './gmail/api'
+import { GmailApiError, type GmailApiClient } from './gmail/api'
 import type { GmailAuthClient, GmailAuthState, GmailAuthStatus } from './gmail/auth'
 import type { GmailApiMessage } from './gmail/types'
 import { TrackerRepository } from './storage/repository'
@@ -215,6 +215,24 @@ describe('Paceboard v2 app', () => {
     expect(screen.getByRole('button', { name: 'Review, 1 pending' })).toBeVisible()
     expect(api.listInitialMessageIds).toHaveBeenCalledOnce()
     expect((await repository.getGmailSyncState()).accountEmail).toBe('max@example.com')
+  })
+
+  it('reports unavailable Gmail messages as skipped instead of failing the sync', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    const auth = fakeAuth('disconnected')
+    const api = fakeGmailApi({
+      listInitialMessageIds: vi.fn().mockResolvedValue(['gone']),
+      getMessage: vi.fn().mockRejectedValue(new GmailApiError('message-unavailable', 404, 'message')),
+    })
+    render(<App repository={repository} gmailAuth={auth} gmailApiFactory={() => api} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Settings & data' }))
+    await user.click(screen.getByRole('button', { name: 'Connect Gmail & scan' }))
+
+    expect(await screen.findByText('Gmail synced; 1 unavailable message skipped')).toBeVisible()
+    expect(screen.queryByText('Gmail could not complete the request.')).not.toBeInTheDocument()
+    expect((await repository.getGmailSyncState()).initialSyncCompleted).toBe(true)
   })
 
   it('synchronizes on open when the in-memory authorization is still valid', async () => {

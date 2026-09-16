@@ -3,11 +3,23 @@ import type { GmailApiMessage } from './types'
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me'
 const INITIAL_QUERY = '{"your application" "application update" "application confirmation" "thank you for applying" "received your application" "successfully applied" assessment hackerrank codesignal codility interview "phone screen" unfortunately "not moving forward" "not selected" "regret to inform" "job offer"}'
 
-export type GmailApiErrorCode = 'authorization' | 'history-expired' | 'rate-limited' | 'unavailable' | 'request-failed'
+export type GmailApiErrorCode =
+  | 'authorization'
+  | 'history-expired'
+  | 'message-unavailable'
+  | 'rate-limited'
+  | 'unavailable'
+  | 'request-failed'
+
+export type GmailApiOperation = 'profile' | 'search' | 'history' | 'message'
 
 export class GmailApiError extends Error {
-  constructor(public readonly code: GmailApiErrorCode, public readonly status: number) {
-    super(messageFor(code))
+  constructor(
+    public readonly code: GmailApiErrorCode,
+    public readonly status: number,
+    public readonly operation?: GmailApiOperation,
+  ) {
+    super(messageFor(code, status, operation))
     this.name = 'GmailApiError'
   }
 }
@@ -33,17 +45,17 @@ export interface GmailApiClient {
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 export function createGmailApiClient(getAccessToken: () => string | null, fetchImpl: Fetch = fetch): GmailApiClient {
-  async function request<T>(url: string, history = false): Promise<T> {
+  async function request<T>(url: string, operation: GmailApiOperation): Promise<T> {
     const token = getAccessToken()
-    if (!token) throw new GmailApiError('authorization', 401)
+    if (!token) throw new GmailApiError('authorization', 401, operation)
     const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } })
-    if (!response.ok) throw classifyError(response.status, history)
+    if (!response.ok) throw classifyError(response.status, operation)
     return response.json() as Promise<T>
   }
 
   return {
     async getProfile() {
-      return request<GmailProfile>(`${GMAIL_API}/profile`)
+      return request<GmailProfile>(`${GMAIL_API}/profile`, 'profile')
     },
 
     async listInitialMessageIds(afterEpochSeconds) {
@@ -54,7 +66,7 @@ export function createGmailApiClient(getAccessToken: () => string | null, fetchI
         url.searchParams.set('maxResults', '100')
         url.searchParams.set('q', `after:${Math.floor(afterEpochSeconds)} ${INITIAL_QUERY}`)
         if (pageToken) url.searchParams.set('pageToken', pageToken)
-        const page = await request<{ messages?: Array<{ id?: string }>; nextPageToken?: string }>(url.toString())
+        const page = await request<{ messages?: Array<{ id?: string }>; nextPageToken?: string }>(url.toString(), 'search')
         for (const message of page.messages ?? []) if (message.id) ids.add(message.id)
         pageToken = page.nextPageToken
       } while (pageToken)
@@ -75,7 +87,7 @@ export function createGmailApiClient(getAccessToken: () => string | null, fetchI
           history?: Array<{ messagesAdded?: Array<{ message?: { id?: string } }> }>
           historyId?: string
           nextPageToken?: string
-        }>(url.toString(), true)
+        }>(url.toString(), 'history')
         for (const history of page.history ?? []) {
           for (const added of history.messagesAdded ?? []) if (added.message?.id) ids.add(added.message.id)
         }
@@ -88,23 +100,27 @@ export function createGmailApiClient(getAccessToken: () => string | null, fetchI
     async getMessage(id) {
       const url = new URL(`${GMAIL_API}/messages/${encodeURIComponent(id)}`)
       url.searchParams.set('format', 'full')
-      return request<GmailApiMessage>(url.toString())
+      return request<GmailApiMessage>(url.toString(), 'message')
     },
   }
 }
 
-function classifyError(status: number, history: boolean): GmailApiError {
-  if (status === 401 || status === 403) return new GmailApiError('authorization', status)
-  if (status === 404 && history) return new GmailApiError('history-expired', status)
-  if (status === 429) return new GmailApiError('rate-limited', status)
-  if (status >= 500) return new GmailApiError('unavailable', status)
-  return new GmailApiError('request-failed', status)
+function classifyError(status: number, operation: GmailApiOperation): GmailApiError {
+  if (status === 401 || status === 403) return new GmailApiError('authorization', status, operation)
+  if (status === 404 && operation === 'history') return new GmailApiError('history-expired', status, operation)
+  if (status === 404 && operation === 'message') return new GmailApiError('message-unavailable', status, operation)
+  if (status === 429) return new GmailApiError('rate-limited', status, operation)
+  if (status >= 500) return new GmailApiError('unavailable', status, operation)
+  return new GmailApiError('request-failed', status, operation)
 }
 
-function messageFor(code: GmailApiErrorCode): string {
+function messageFor(code: GmailApiErrorCode, status: number, operation?: GmailApiOperation): string {
   if (code === 'authorization') return 'Reconnect Gmail to continue syncing.'
   if (code === 'history-expired') return 'Gmail history expired; a recovery scan is required.'
+  if (code === 'message-unavailable') return 'A Gmail message became unavailable before it could be synced.'
   if (code === 'rate-limited') return 'Gmail is temporarily limiting requests. Try again shortly.'
   if (code === 'unavailable') return 'Gmail is temporarily unavailable.'
-  return 'Gmail could not complete the request.'
+  return operation
+    ? `Gmail could not complete the ${operation} request (HTTP ${status}).`
+    : `Gmail could not complete the request (HTTP ${status}).`
 }

@@ -16,6 +16,7 @@ export type GmailSyncMode = 'initial' | 'incremental' | 'recovery'
 export interface GmailSyncResult {
   newCandidates: number
   inspectedMessages: number
+  skippedMessages: number
   mode: GmailSyncMode
   syncedAt: string
 }
@@ -81,7 +82,24 @@ export async function syncGmail({
   const retryIds = processed.filter((message) => message.disposition === 'error').map((message) => message.messageId)
   const pendingIds = [...new Set([...messageIds, ...retryIds, ...refreshCandidateIds])].filter((id) => !knownIds.has(id))
   const outcomes = await mapWithConcurrency(pendingIds, MESSAGE_CONCURRENCY, async (messageId) => {
-    const raw = await api.getMessage(messageId)
+    let raw
+    try {
+      raw = await api.getMessage(messageId)
+    } catch (caught) {
+      if (caught instanceof GmailApiError && caught.code === 'message-unavailable') {
+        const preserveCandidate = refreshCandidateIds.has(messageId)
+        return {
+          skipped: true,
+          preserveCandidate,
+          processed: createProcessedGmailMessage({
+            messageId,
+            disposition: preserveCandidate ? 'candidate' : 'ignored',
+            processedAt: syncedAt,
+          }),
+        }
+      }
+      throw caught
+    }
     try {
       const message = normalizeGmailMessage(raw)
       const statusUpdate = detectApplicationStatusUpdate(message)
@@ -169,16 +187,22 @@ export async function syncGmail({
     newCandidates.push(outcome.candidate)
     return outcome.processed
   })
+  const preservedCandidateIds = new Set(outcomes.flatMap((outcome) =>
+    outcome.preserveCandidate ? [outcome.processed.messageId] : [],
+  ))
   await repository.commitGmailSync({
     candidates: newCandidates,
     processedMessages,
     syncState: nextState,
-    removedCandidateIds: [...refreshCandidateIds].filter((messageId) => !newCandidates.some((candidate) => candidate.messageId === messageId)),
+    removedCandidateIds: [...refreshCandidateIds].filter((messageId) =>
+      !preservedCandidateIds.has(messageId) && !newCandidates.some((candidate) => candidate.messageId === messageId),
+    ),
   })
 
   return {
     newCandidates: newCandidates.length,
     inspectedMessages: pendingIds.length,
+    skippedMessages: outcomes.filter((outcome) => outcome.skipped).length,
     mode,
     syncedAt,
   }

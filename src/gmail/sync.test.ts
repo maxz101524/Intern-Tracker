@@ -28,7 +28,7 @@ describe('Gmail synchronization', () => {
     const result = await syncGmail({ api, repository, now: new Date('2026-09-10T14:00:00.000Z') })
 
     expect(api.listInitialMessageIds).toHaveBeenCalledWith(1786456800)
-    expect(result).toEqual({ newCandidates: 1, inspectedMessages: 2, mode: 'initial', syncedAt: '2026-09-10T14:00:00.000Z' })
+    expect(result).toEqual({ newCandidates: 1, inspectedMessages: 2, skippedMessages: 0, mode: 'initial', syncedAt: '2026-09-10T14:00:00.000Z' })
     expect(await repository.listGmailCandidates('pending')).toEqual([
       expect.objectContaining({ messageId: 'm1', company: 'Acme', title: 'Data Science Intern' }),
     ])
@@ -96,6 +96,45 @@ describe('Gmail synchronization', () => {
     })
 
     await expect(syncGmail({ api, repository })).rejects.toMatchObject({ code: 'rate-limited' })
+    expect(await repository.getGmailSyncState()).toEqual(previous)
+  })
+
+  it('skips a permanently unavailable message without blocking the remaining batch', async () => {
+    await repository.saveGmailSyncState({
+      key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
+      lastSuccessfulSyncAt: '2026-09-09T12:00:00.000Z', initialSyncCompleted: true,
+    })
+    const api = fakeApi({
+      getProfile: vi.fn().mockResolvedValue({ emailAddress: 'max@example.com', historyId: '520' }),
+      listHistoryMessageIds: vi.fn().mockResolvedValue({ messageIds: ['gone', 'm2'], historyId: '520' }),
+      getMessage: vi.fn(async (id: string) => {
+        if (id === 'gone') throw new GmailApiError('message-unavailable', 404, 'message')
+        return message('m2', 'Application received', 'We received your application for the ML Intern position at Acme.')
+      }),
+    })
+
+    const result = await syncGmail({ api, repository, now: new Date('2026-09-10T14:00:00.000Z') })
+
+    expect(result).toMatchObject({ newCandidates: 1, inspectedMessages: 2, skippedMessages: 1 })
+    expect(await repository.listProcessedGmailMessages()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ messageId: 'gone', disposition: 'ignored' }),
+      expect.objectContaining({ messageId: 'm2', disposition: 'candidate' }),
+    ]))
+    expect((await repository.getGmailSyncState()).historyId).toBe('520')
+  })
+
+  it('still preserves the checkpoint when retrieving a message fails transiently', async () => {
+    const previous = {
+      key: 'gmail' as const, accountEmail: 'max@example.com', historyId: '500',
+      lastSuccessfulSyncAt: '2026-09-09T12:00:00.000Z', initialSyncCompleted: true,
+    }
+    await repository.saveGmailSyncState(previous)
+    const api = fakeApi({
+      listHistoryMessageIds: vi.fn().mockResolvedValue({ messageIds: ['m1'], historyId: '520' }),
+      getMessage: vi.fn().mockRejectedValue(new GmailApiError('unavailable', 503, 'message')),
+    })
+
+    await expect(syncGmail({ api, repository })).rejects.toMatchObject({ code: 'unavailable', status: 503 })
     expect(await repository.getGmailSyncState()).toEqual(previous)
   })
 
@@ -200,6 +239,36 @@ describe('Gmail synchronization', () => {
 
     expect(api.getMessage).toHaveBeenCalledWith(oldCandidate.messageId)
     expect(await repository.listGmailCandidates('pending')).toEqual([])
+    expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 2, historyId: '520' })
+  })
+
+  it('preserves an existing pending review when its Gmail message is no longer available', async () => {
+    await repository.saveGmailSyncState({
+      key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
+      lastSuccessfulSyncAt: '2026-09-09T12:00:00.000Z', initialSyncCompleted: true,
+      detectorVersion: 1,
+    })
+    const oldCandidate = createGmailCandidate({
+      messageId: 'old-gone', threadId: 'thread-old-gone', receivedAt: '2026-09-09T13:30:00.000Z', submittedDate: '2026-09-09',
+      sender: 'Acme Recruiting <jobs@acme.com>', subject: 'Application received', company: 'Acme', title: 'ML Intern',
+      confidence: 'high', matchedRule: 'generic-confirmation',
+    })
+    await repository.saveGmailCandidate(oldCandidate)
+    await repository.saveProcessedGmailMessage({
+      messageId: oldCandidate.messageId, disposition: 'candidate', processedAt: '2026-09-09T14:00:00.000Z',
+    })
+    const api = fakeApi({
+      listHistoryMessageIds: vi.fn().mockResolvedValue({ messageIds: [], historyId: '520' }),
+      getMessage: vi.fn().mockRejectedValue(new GmailApiError('message-unavailable', 404, 'message')),
+    })
+
+    const result = await syncGmail({ api, repository, now: new Date('2026-09-10T14:00:00.000Z') })
+
+    expect(result.skippedMessages).toBe(1)
+    expect(await repository.listGmailCandidates('pending')).toEqual([oldCandidate])
+    expect(await repository.listProcessedGmailMessages()).toEqual([
+      expect.objectContaining({ messageId: oldCandidate.messageId, disposition: 'candidate' }),
+    ])
     expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 2, historyId: '520' })
   })
 

@@ -56,6 +56,34 @@ describe('Gmail REST client', () => {
     expect(String(error)).not.toContain('private mailbox content')
   })
 
+  it('classifies a missing message separately from an expired history cursor', async () => {
+    const api = createGmailApiClient(
+      () => 'token',
+      vi.fn().mockResolvedValue(new Response('{"error":{"message":"Message not found"}}', { status: 404 })),
+    )
+
+    const error = await api.getMessage('deleted-message').catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(GmailApiError)
+    expect(error).toMatchObject({ code: 'message-unavailable', status: 404, operation: 'message' })
+    expect(String(error)).not.toContain('deleted-message')
+    expect(String(error)).not.toContain('Message not found')
+  })
+
+  it('identifies the failed Gmail operation in safe diagnostics', async () => {
+    const api = createGmailApiClient(
+      () => 'token',
+      vi.fn().mockResolvedValue(new Response('{"error":{"message":"private mailbox detail"}}', { status: 400 })),
+    )
+
+    const error = await api.listHistoryMessageIds('500').catch((caught) => caught)
+
+    expect(error).toMatchObject({ code: 'request-failed', status: 400, operation: 'history' })
+    expect(String(error)).toContain('history')
+    expect(String(error)).toContain('HTTP 400')
+    expect(String(error)).not.toContain('private mailbox detail')
+  })
+
   it('requires a live access token before making a request', async () => {
     const fetchMock = vi.fn()
     const api = createGmailApiClient(() => null, fetchMock)

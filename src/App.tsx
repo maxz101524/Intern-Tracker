@@ -56,7 +56,13 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   useEffect(() => { void load() }, [load])
   useEffect(() => {
     if (!gmailResult) return
-    setToast({ message: gmailResult.newCandidates > 0 ? `${gmailResult.newCandidates} Gmail ${gmailResult.newCandidates === 1 ? 'match is' : 'matches are'} ready to review` : 'Gmail is up to date' })
+    const matches = gmailResult.newCandidates > 0
+      ? `${gmailResult.newCandidates} Gmail ${gmailResult.newCandidates === 1 ? 'match is' : 'matches are'} ready to review`
+      : gmailResult.skippedMessages > 0 ? 'Gmail synced' : 'Gmail is up to date'
+    const skipped = gmailResult.skippedMessages > 0
+      ? `; ${gmailResult.skippedMessages} unavailable ${gmailResult.skippedMessages === 1 ? 'message' : 'messages'} skipped`
+      : ''
+    setToast({ message: `${matches}${skipped}` })
     clearGmailResult()
   }, [gmailResult, clearGmailResult])
   useEffect(() => {

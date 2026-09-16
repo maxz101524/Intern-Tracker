@@ -27,6 +27,8 @@ export interface NormalizedGmailMessage {
   text: string
 }
 
+export const UNKNOWN_GMAIL_ROLE_TITLE = 'Role needs review'
+
 export interface DetectionResult {
   company: string
   title: string

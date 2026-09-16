@@ -167,6 +167,7 @@ input:hover, select:hover, textarea:hover { border-color: #a7b3c4; }
 .drawer-form { display:grid; gap:16px; padding-top:19px; }
 .two-fields { display:grid; grid-template-columns:1fr 1fr; gap:11px; }
 .effort-fieldset { margin:0; padding:0; border:0; }
+.classification-fieldset { margin-bottom:18px; }
 .effort-fieldset legend { margin-bottom:7px; color:#4f5c72; font-size:.74rem; font-weight:640; }
 .effort-control { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .effort-control label { position:relative; display:block; min-height:61px; padding:10px 11px; border:1px solid #ccd6e4; border-radius:7px; cursor:pointer; }

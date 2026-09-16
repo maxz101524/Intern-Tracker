@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { findPossibleDuplicate, rankGmailApplicationMatches } from '../domain/gmail'
 import { getDisplayStatus, statusLabel } from '../domain/status'
 import type { ApplicationEffort, ApplicationEntry, ApplicationStatus, GmailCandidate } from '../domain/types'
+import { UNKNOWN_GMAIL_ROLE_TITLE } from '../gmail/types'
 import type { GmailReviewInput, GmailStatusReviewInput } from '../hooks/useGmailImport'
 import { StatusBadge } from './StatusBadge'
 
@@ -18,6 +19,7 @@ interface GmailReviewProps {
 }
 
 interface ReviewDraft {
+  resolution: 'application' | 'status'
   company: string
   title: string
   submittedDate: string
@@ -91,19 +93,20 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
   const headingRef = useRef<HTMLHeadingElement>(null)
   const defaultMatches = useMemo(() => candidate.matchedEntryIds ?? [], [candidate.matchedEntryIds])
   const [draft, setDraftState] = useState<ReviewDraft>(() => storedDraft ?? {
+    resolution: candidate.kind === 'status' ? 'status' : 'application',
     company: candidate.company,
-    title: candidate.title,
+    title: candidate.title === UNKNOWN_GMAIL_ROLE_TITLE ? '' : candidate.title,
     submittedDate: candidate.submittedDate,
     effort: 'quick',
     entryId: defaultMatches.length === 1 ? defaultMatches[0] : '',
-    status: candidate.suggestedStatus ?? 'applied',
+    status: candidate.suggestedStatus ?? 'online_assessment',
     eventDate: candidate.eventDate ?? candidate.submittedDate,
     editing: false,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [matchQuery, setMatchQuery] = useState('')
-  const duplicate = useMemo(() => candidate.kind === 'status' ? null : findPossibleDuplicate({ ...candidate, company: draft.company, title: draft.title, submittedDate: draft.submittedDate }, entries), [candidate, draft.company, draft.submittedDate, draft.title, entries])
+  const duplicate = useMemo(() => draft.resolution === 'status' ? null : findPossibleDuplicate({ ...candidate, company: draft.company, title: draft.title, submittedDate: draft.submittedDate }, entries), [candidate, draft.company, draft.resolution, draft.submittedDate, draft.title, entries])
   const duplicateEntry = entries.find((entry) => entry.id === duplicate?.entryId)
   const matchOptions = useMemo(() => {
     const scores = new Map(rankGmailApplicationMatches(candidate, entries).map((match) => [match.entryId, match.score]))
@@ -142,7 +145,7 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (candidate.kind === 'status') {
+    if (draft.resolution === 'status') {
       await run(() => onAcceptStatus(candidate, { entryId: draft.entryId, status: draft.status, eventDate: draft.eventDate }), 'This status suggestion could not be applied.')
     } else {
       await run(() => onAccept(candidate, { company: draft.company, title: draft.title, submittedDate: draft.submittedDate, effort: draft.effort }), 'This application could not be added.')
@@ -161,11 +164,12 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
       </div>
 
       <form onSubmit={submit}>
-        {candidate.kind === 'status' ? <>
+        <fieldset className="effort-fieldset classification-fieldset" aria-label="Email classification"><legend>Treat this email as</legend><div className="effort-control"><label className={draft.resolution === 'application' ? 'selected' : ''}><input type="radio" name={`classification-${candidate.messageId}`} aria-label="New application" checked={draft.resolution === 'application'} onChange={() => patchDraft({ resolution: 'application' })} /><span><strong>New application</strong><small>Create a new tracked role</small></span></label><label className={draft.resolution === 'status' ? 'selected' : ''}><input type="radio" name={`classification-${candidate.messageId}`} aria-label="Status update" checked={draft.resolution === 'status'} onChange={() => patchDraft({ resolution: 'status' })} /><span><strong>Status update</strong><small>Apply an event to an existing role</small></span></label></div></fieldset>
+        {draft.resolution === 'status' ? <>
           <div className="suggestion-route"><span>Existing application</span>{selectedEntry ? <button type="button" className="matched-application" onClick={() => patchDraft({ editing: true })}><strong>{selectedEntry.company}</strong><span>{selectedEntry.title}</span><StatusBadge status={getDisplayStatus(selectedEntry)} /></button> : <p className="duplicate-warning"><AlertTriangle size={17} />Choose the application this email belongs to.</p>}</div>
-          {(draft.editing || defaultMatches.length !== 1) && <ApplicationPicker entries={matchOptions} recommendedIds={defaultMatches} selectedId={draft.entryId} query={matchQuery} onQuery={setMatchQuery} onSelect={(entryId) => patchDraft({ entryId })} />}
+          {(draft.editing || candidate.kind !== 'status' || defaultMatches.length !== 1) && <ApplicationPicker entries={matchOptions} recommendedIds={defaultMatches} selectedId={draft.entryId} query={matchQuery} onQuery={setMatchQuery} onSelect={(entryId) => patchDraft({ entryId })} />}
           <div className="suggested-change"><span>Suggested change</span><strong>{statusLabel(draft.status)}</strong><time dateTime={draft.eventDate}>{draft.eventDate}</time></div>
-          {draft.editing && <div className="two-fields"><label>Status<select value={draft.status} onChange={(event) => patchDraft({ status: event.target.value as ApplicationStatus })}><option value="online_assessment">Online assessment</option><option value="recruiter_screen">Recruiter screen</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option></select></label><label>Event date<input type="date" min={selectedEntry?.submittedDate} value={draft.eventDate} onChange={(event) => patchDraft({ eventDate: event.target.value })} /></label></div>}
+          {(draft.editing || candidate.kind !== 'status') && <div className="two-fields"><label>Status<select value={draft.status} onChange={(event) => patchDraft({ status: event.target.value as ApplicationStatus })}><option value="online_assessment">Online assessment</option><option value="recruiter_screen">Recruiter screen</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option></select></label><label>Event date<input type="date" min={selectedEntry?.submittedDate} value={draft.eventDate} onChange={(event) => patchDraft({ eventDate: event.target.value })} /></label></div>}
         </> : <>
           <div className="two-fields"><label>Company<input required value={draft.company} onChange={(event) => patchDraft({ company: event.target.value })} autoComplete="organization" /></label><label>Role title<input required value={draft.title} onChange={(event) => patchDraft({ title: event.target.value })} /></label></div>
           <label className="review-date">Submitted<input required type="date" value={draft.submittedDate} onChange={(event) => patchDraft({ submittedDate: event.target.value })} /></label>
@@ -178,7 +182,7 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
           <div className="review-pagination"><button type="button" className="icon-button" onClick={onPrevious} disabled={position === 1} aria-label="Previous Gmail match"><ArrowLeft size={18} /></button><button type="button" className="icon-button" onClick={onNext} disabled={position === total} aria-label="Next Gmail match"><ArrowRight size={18} /></button></div>
           <span className="drawer-action-spacer" />
           <button type="button" className="button danger-text" disabled={saving} onClick={() => void run(() => onDismiss(candidate), 'This match could not be dismissed.')}><Trash2 size={16} /> Dismiss</button>
-          {candidate.kind === 'status' ? <><button type="button" className="button secondary" onClick={() => patchDraft({ editing: !draft.editing })}>Edit</button><button type="submit" className="button primary" disabled={saving || !draft.entryId}><Check size={16} /> {saving ? 'Applying…' : 'Accept'}</button></> : duplicateEntry ? <><button type="button" className="button secondary" disabled={saving} onClick={() => void run(() => onLink(candidate, duplicateEntry.id), 'This email could not be linked.')}><Link2 size={16} /> Link to existing</button><button type="submit" className="button primary" disabled={saving}><Check size={16} /> Add separately</button></> : <button type="submit" className="button primary" disabled={saving}><Check size={16} /> {saving ? 'Adding…' : 'Add & next'}</button>}
+          {draft.resolution === 'status' ? <>{candidate.kind === 'status' && <button type="button" className="button secondary" onClick={() => patchDraft({ editing: !draft.editing })}>Edit</button>}<button type="submit" className="button primary" disabled={saving || !draft.entryId}><Check size={16} /> {saving ? 'Applying…' : 'Accept'}</button></> : duplicateEntry ? <><button type="button" className="button secondary" disabled={saving} onClick={() => void run(() => onLink(candidate, duplicateEntry.id), 'This email could not be linked.')}><Link2 size={16} /> Link to existing</button><button type="submit" className="button primary" disabled={saving}><Check size={16} /> Add separately</button></> : <button type="submit" className="button primary" disabled={saving}><Check size={16} /> {saving ? 'Adding…' : 'Add & next'}</button>}
         </div>
       </form>
     </section>

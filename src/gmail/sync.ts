@@ -9,7 +9,7 @@ const INITIAL_DAYS = 30
 const RECOVERY_DAYS = 2
 const DAY_MS = 86_400_000
 const MESSAGE_CONCURRENCY = 5
-const DETECTOR_VERSION = 2
+const DETECTOR_VERSION = 3
 
 export type GmailSyncMode = 'initial' | 'incremental' | 'recovery'
 

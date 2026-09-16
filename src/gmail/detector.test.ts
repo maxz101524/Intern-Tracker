@@ -32,6 +32,51 @@ describe('application confirmation detection', () => {
     }))
   })
 
+  it('treats a Workday receipt as a new application despite hypothetical rejection language', () => {
+    const email = message({
+      from: 'Workday at S&P Global <spgi@myworkday.com>',
+      subject: 'Thank you for your Application!',
+      text: 'Thank you for your interest in Kensho. We wanted to let you know we received your application for Machine Learning Engineer - Summer Intern 2027, and we are delighted that you would consider joining our team. Our team will review your application and will be in touch if your qualifications match our needs for the role. If you are not selected for the position, keep an eye on our jobs page as we are growing and adding openings.',
+    })
+
+    expect(detectApplicationStatusUpdate(email)).toBeNull()
+    expect(detectApplicationConfirmation(email)).toEqual(expect.objectContaining({
+      company: 'Kensho',
+      title: 'Machine Learning Engineer - Summer Intern 2027',
+      confidence: 'high',
+      matchedRule: 'workday-confirmation',
+    }))
+  })
+
+  it('queues a Figma receipt for manual role entry instead of calling it a rejection', () => {
+    const email = message({
+      from: 'no-reply@figma.com',
+      subject: 'Thank you for your application to Figma',
+      text: 'Our team will review your application. If you are not selected for this position, keep an eye on our jobs page as we are growing and adding openings. Warm regards, The Figma Team.',
+    })
+
+    expect(detectApplicationStatusUpdate(email)).toBeNull()
+    expect(detectApplicationConfirmation(email)).toEqual(expect.objectContaining({
+      company: 'Figma',
+      title: 'Role needs review',
+      confidence: 'medium',
+    }))
+  })
+
+  it('treats a Cigna receipt as a new application despite conditional interview guidance', () => {
+    const email = message({
+      from: 'Cigna Notifications <CignaNotifications@workday.cigna.com>',
+      subject: "Application Received - The Cigna Group - The Cigna Group's Technology Development Program - AI Engineering Track Summer Internship - 26009535",
+      text: "We received your application for the The Cigna Group's Technology Development Program - AI Engineering Track Summer Internship - 26009535 position. Over the coming weeks, our recruiting team will assess applications for this position. If you're selected to move forward, you'll be invited to meet with a recruiter to discuss this opportunity further. Visit our How We Hire page for resources like interview tips and more.",
+    })
+
+    expect(detectApplicationStatusUpdate(email)).toBeNull()
+    expect(detectApplicationConfirmation(email)).toEqual(expect.objectContaining({
+      company: 'Cigna',
+      title: expect.stringContaining('AI Engineering Track Summer Internship'),
+    }))
+  })
+
   it.each([
     ['New Data Science Intern jobs near you', 'Your weekly job alert'],
     ['You saved Data Science Intern', 'Return to your saved job'],

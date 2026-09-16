@@ -38,7 +38,7 @@ describe('Gmail synchronization', () => {
     ])
     expect(await repository.getGmailSyncState()).toEqual({
       key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
-      lastSuccessfulSyncAt: '2026-09-10T14:00:00.000Z', initialSyncCompleted: true, detectorVersion: 2,
+      lastSuccessfulSyncAt: '2026-09-10T14:00:00.000Z', initialSyncCompleted: true, detectorVersion: 3,
     })
   })
 
@@ -217,6 +217,7 @@ describe('Gmail synchronization', () => {
     await repository.saveGmailSyncState({
       key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
       lastSuccessfulSyncAt: '2026-09-09T12:00:00.000Z', initialSyncCompleted: true,
+      detectorVersion: 2,
     })
     const oldCandidate = createGmailCandidate({
       messageId: 'old-false-positive', threadId: 'thread-old', receivedAt: '2026-09-09T13:30:00.000Z', submittedDate: '2026-09-09',
@@ -239,7 +240,45 @@ describe('Gmail synchronization', () => {
 
     expect(api.getMessage).toHaveBeenCalledWith(oldCandidate.messageId)
     expect(await repository.listGmailCandidates('pending')).toEqual([])
-    expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 2, historyId: '520' })
+    expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 3, historyId: '520' })
+  })
+
+  it('reclassifies a pending false rejection as an application confirmation after detector upgrades', async () => {
+    await repository.saveGmailSyncState({
+      key: 'gmail', accountEmail: 'max@example.com', historyId: '500',
+      lastSuccessfulSyncAt: '2026-09-15T12:00:00.000Z', initialSyncCompleted: true,
+      detectorVersion: 2,
+    })
+    const oldCandidate = createGmailCandidate({
+      messageId: 'kensho-receipt', threadId: 'thread-kensho', receivedAt: '2026-09-15T23:54:55.000Z', submittedDate: '2026-09-15',
+      sender: 'Workday at S&P Global <spgi@myworkday.com>', subject: 'Thank you for your Application!',
+      company: 'Workday at S&P Global', title: 'Application update', confidence: 'medium', matchedRule: 'workday-rejected',
+      kind: 'status', suggestedStatus: 'rejected', eventDate: '2026-09-15', matchedEntryIds: [],
+      supportingSnippet: 'If you are not selected for the position, keep an eye on our jobs page.',
+    })
+    await repository.saveGmailCandidate(oldCandidate)
+    await repository.saveProcessedGmailMessage({
+      messageId: oldCandidate.messageId, disposition: 'candidate', processedAt: '2026-09-15T23:55:00.000Z',
+    })
+    const api = fakeApi({
+      listHistoryMessageIds: vi.fn().mockResolvedValue({ messageIds: [], historyId: '520' }),
+      getMessage: vi.fn().mockResolvedValue(message(
+        oldCandidate.messageId,
+        oldCandidate.subject,
+        'Thank you for your interest in Kensho. We wanted to let you know we received your application for Machine Learning Engineer - Summer Intern 2027. If you are not selected for the position, keep an eye on our jobs page.',
+        oldCandidate.sender,
+      )),
+    })
+
+    await syncGmail({ api, repository, now: new Date('2026-09-16T14:00:00.000Z') })
+
+    const [reclassified] = await repository.listGmailCandidates('pending')
+    expect(reclassified).toMatchObject({
+      messageId: oldCandidate.messageId, company: 'Kensho',
+      title: 'Machine Learning Engineer - Summer Intern 2027',
+    })
+    expect(reclassified).not.toHaveProperty('kind')
+    expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 3, historyId: '520' })
   })
 
   it('preserves an existing pending review when its Gmail message is no longer available', async () => {
@@ -269,7 +308,7 @@ describe('Gmail synchronization', () => {
     expect(await repository.listProcessedGmailMessages()).toEqual([
       expect.objectContaining({ messageId: oldCandidate.messageId, disposition: 'candidate' }),
     ])
-    expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 2, historyId: '520' })
+    expect(await repository.getGmailSyncState()).toMatchObject({ detectorVersion: 3, historyId: '520' })
   })
 
   it('queues only one review item when Gmail sends duplicate confirmations', async () => {
@@ -298,13 +337,13 @@ function fakeApi(overrides: Partial<GmailApiClient>): GmailApiClient {
   }
 }
 
-function message(id: string, subject: string, text: string): GmailApiMessage {
+function message(id: string, subject: string, text: string, from = 'Acme Recruiting <jobs@acme.com>'): GmailApiMessage {
   return {
     id, threadId: `thread-${id}`, internalDate: '1789047000000',
     payload: {
       mimeType: 'text/plain',
       headers: [
-        { name: 'From', value: 'Acme Recruiting <jobs@acme.com>' },
+        { name: 'From', value: from },
         { name: 'Subject', value: subject },
       ],
       body: { data: encode(text) },

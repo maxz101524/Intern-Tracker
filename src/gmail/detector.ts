@@ -1,4 +1,4 @@
-import type { DetectionResult, NormalizedGmailMessage, StatusDetectionResult } from './types'
+import { UNKNOWN_GMAIL_ROLE_TITLE, type DetectionResult, type NormalizedGmailMessage, type StatusDetectionResult } from './types'
 
 const confirmationMarkers = [
   /thank(?:s| you) for (?:submitting|applying)/i,
@@ -46,12 +46,13 @@ export function detectApplicationConfirmation(message: NormalizedGmailMessage): 
   if (!confirmationMarkers.some((pattern) => pattern.test(combined))) return null
 
   const rule = providerRule(message.from)
-  const pair = extractPair(combined)
+  const pair = extractInterestReceiptPair(combined) ?? extractPair(combined)
   if (pair && isPlausibleIdentity(pair)) return { ...pair, confidence: 'high', matchedRule: rule }
 
-  const title = extractTitle(combined)
   const company = extractCompany(message.subject) ?? companyFromSender(message.from)
-  if (!title || !company || !isPlausibleIdentity({ title, company })) return null
+  if (!company) return null
+  const title = extractTitle(combined) ?? UNKNOWN_GMAIL_ROLE_TITLE
+  if (title !== UNKNOWN_GMAIL_ROLE_TITLE && !isPlausibleIdentity({ title, company })) return null
   return { company, title, confidence: 'medium', matchedRule: rule }
 }
 
@@ -77,19 +78,33 @@ export function detectApplicationStatusUpdate(message: NormalizedGmailMessage): 
 }
 
 function detectSuggestedStatus(value: string): StatusDetectionResult['suggestedStatus'] | null {
-  // A rejection can mention an earlier interview or assessment, so terminal states win.
-  if (
-    /\b(?:unfortunately|regret to inform|not selected|not be selected|declined your application|no longer (?:being |under )?consideration|position (?:has been|was) filled)\b/i.test(value) ||
-    /\b(?:decided|chosen|will|are|have) (?:to )?not (?:to )?(?:move|moving|proceed|continue|advance)/i.test(value) ||
-    /\b(?:will not|won't|cannot|unable to) (?:move|be moving|proceed|continue|advance) (?:you |your application )?forward\b/i.test(value) ||
-    /\b(?:moving|proceeding|continue) (?:ahead |forward )?with (?:another|other) candidates?\b/i.test(value)
-  ) return 'rejected'
+  const segments = statusSegments(value).filter((segment) => !isHypotheticalStatusSegment(segment))
 
-  if (/\b(?:pleased|delighted|excited) to (?:extend|offer)|\boffer of employment\b|\bjob offer\b/i.test(value)) return 'offer'
-  if (/\b(?:interview|virtual interview|onsite|on-site|superday|final round)\b/i.test(value) && /invite|schedule|availability|select a time|next (?:step|round)|meet with/i.test(value)) return 'interview'
-  if (/\b(?:phone screen|recruiter screen|introductory call|initial call)\b/i.test(value) && /invite|schedule|availability|select a time|next step/i.test(value)) return 'recruiter_screen'
-  if (/\b(?:online |coding |technical |pre-employment )?assessment\b|hackerrank|codesignal|codility|hirevue/i.test(value) && /invite|complete|deadline|due|next step|request|assigned/i.test(value)) return 'online_assessment'
+  // A rejection can mention an earlier interview or assessment, so terminal states win.
+  if (segments.some((segment) =>
+    /\b(?:unfortunately|regret to inform|not selected|not be selected|declined your application|no longer (?:being |under )?consideration|position (?:has been|was) filled)\b/i.test(segment) ||
+    /\b(?:decided|chosen|will|are|have) (?:to )?not (?:to )?(?:move|moving|proceed|continue|advance)/i.test(segment) ||
+    /\b(?:will not|won't|cannot|unable to) (?:move|be moving|proceed|continue|advance) (?:you |your application )?forward\b/i.test(segment) ||
+    /\b(?:moving|proceeding|continue) (?:ahead |forward )?with (?:another|other) candidates?\b/i.test(segment)
+  )) return 'rejected'
+
+  if (segments.some((segment) => /\b(?:pleased|delighted|excited) to (?:extend|offer)|\boffer of employment\b|\bjob offer\b/i.test(segment))) return 'offer'
+  if (segments.some((segment) => /\b(?:interview|virtual interview|onsite|on-site|superday|final round)\b/i.test(segment) && /invite|schedule|availability|select a time|next (?:step|round)|meet with/i.test(segment))) return 'interview'
+  if (segments.some((segment) => /\b(?:phone screen|recruiter screen|introductory call|initial call)\b/i.test(segment) && /invite|schedule|availability|select a time|next step/i.test(segment))) return 'recruiter_screen'
+  if (segments.some((segment) => /\b(?:online |coding |technical |pre-employment )?assessment\b|hackerrank|codesignal|codility|hirevue/i.test(segment) && /invite|complete|deadline|due|next step|request|assigned/i.test(segment))) return 'online_assessment'
   return null
+}
+
+function statusSegments(value: string): string[] {
+  return value
+    .split(/[\r\n]+|[.!?](?:\s+|$)/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+}
+
+function isHypotheticalStatusSegment(value: string): boolean {
+  return /^(?:if|should|in the event|in case)\b/i.test(value) ||
+    /\bif (?:you|your application)\b/i.test(value)
 }
 
 function extractStatusPair(value: string): Pick<DetectionResult, 'company' | 'title'> | null {
@@ -125,6 +140,14 @@ function extractPair(value: string): Pick<DetectionResult, 'company' | 'title'> 
     if (isPlausibleIdentity(pair)) return pair
   }
   return null
+}
+
+function extractInterestReceiptPair(value: string): Pick<DetectionResult, 'company' | 'title'> | null {
+  const company = value.match(/thank you for your interest in\s+([^\n.!?]{2,80})/i)?.[1]
+  const title = value.match(/received your application for (?:the )?(.+?)(?:\s+(?:position|role))?(?:,|[.!?\n]|$)/i)?.[1]
+  if (!company || !title) return null
+  const pair = { company: cleanCompany(company), title: cleanTitle(title) }
+  return isPlausibleIdentity(pair) ? pair : null
 }
 
 function extractTitle(value: string): string | null {

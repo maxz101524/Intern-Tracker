@@ -332,6 +332,34 @@ describe('Paceboard v2 app', () => {
     expect(await repository.getGmailCandidate('status-1')).toMatchObject({ state: 'imported', linkedEntryId: application.id })
   })
 
+  it('converts a misclassified status suggestion into a manually edited new application', async () => {
+    const user = userEvent.setup()
+    await readyRepository(repository)
+    await repository.saveGmailCandidate(createGmailCandidate({
+      messageId: 'misclassified-confirmation', threadId: 'thread-misclassified',
+      receivedAt: '2026-09-16T12:36:00.000Z', submittedDate: '2026-09-16',
+      sender: 'Cigna Notifications <CignaNotifications@workday.cigna.com>',
+      subject: 'Application Received - The Cigna Group', company: 'Cigna', title: 'Application update',
+      confidence: 'medium', matchedRule: 'workday-interview', kind: 'status', suggestedStatus: 'interview',
+      eventDate: '2026-09-16', matchedEntryIds: [], supportingSnippet: 'If selected, you will be invited to meet a recruiter.',
+    }))
+    render(<App repository={repository} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Review, 1 pending' }))
+    await user.click(screen.getByRole('radio', { name: 'New application' }))
+    await user.clear(screen.getByLabelText('Role title'))
+    await user.type(screen.getByLabelText('Role title'), 'AI Engineering Track Summer Internship')
+    await user.click(screen.getByRole('button', { name: 'Add & next' }))
+
+    await waitFor(async () => expect(await repository.listEntries()).toHaveLength(1))
+    expect((await repository.listEntries())[0]).toMatchObject({
+      company: 'Cigna', title: 'AI Engineering Track Summer Internship', submittedDate: '2026-09-16',
+      statusHistory: [expect.objectContaining({ status: 'applied' })],
+      origin: { provider: 'gmail', messageId: 'misclassified-confirmation' },
+    })
+    expect(await repository.getGmailCandidate('misclassified-confirmation')).toMatchObject({ state: 'imported' })
+  })
+
   it('searches a long application list when a status email has multiple possible matches', async () => {
     const user = userEvent.setup()
     await readyRepository(repository)

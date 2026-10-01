@@ -5,13 +5,16 @@ import { findRestoreConflicts, type RestoreChoices } from '../domain/restore'
 import { DEFAULT_APPLICATION_DAYS, DEFAULT_RESUME_VARIANTS } from '../domain/settings'
 import type { ApplicationEntry, AppSettings, TrackerBackup } from '../domain/types'
 import type { GmailImportController } from '../hooks/useGmailImport'
+import type { MuseSyncController } from '../hooks/useMuseSync'
 import { downloadText } from '../utils/download'
 import { GmailSettings } from './GmailSettings'
+import { MuseSettings } from './MuseSettings'
 
 interface SettingsProps {
   entries: ApplicationEntry[]
   settings: AppSettings
   gmail: GmailImportController
+  muse: MuseSyncController
   onSave: (settings: AppSettings) => Promise<void>
   onMarkBackup: (exportedAt: string) => Promise<void>
   onRestore: (raw: string, mode: 'merge' | 'replace', choices?: RestoreChoices) => Promise<void>
@@ -22,7 +25,7 @@ const days = [
   { value: 4, label: 'Thu' }, { value: 5, label: 'Fri' }, { value: 6, label: 'Sat' }, { value: 0, label: 'Sun' },
 ]
 
-export function Settings({ entries, settings, gmail, onSave, onMarkBackup, onRestore }: SettingsProps) {
+export function Settings({ entries, settings, gmail, muse, onSave, onMarkBackup, onRestore }: SettingsProps) {
   const [target, setTarget] = useState(String(settings.weeklyTarget))
   const [sources, setSources] = useState(settings.sources)
   const [newSource, setNewSource] = useState('')
@@ -61,7 +64,7 @@ export function Settings({ entries, settings, gmail, onSave, onMarkBackup, onRes
   async function exportJson() {
     const exportedAt = new Date().toISOString()
     const nextSettings = { ...settings, lastBackupAt: exportedAt, lastBackupChangeCount: settings.changeCount ?? 0 }
-    const backup = buildBackup(entries, nextSettings, gmail.gmailData, exportedAt)
+    const backup = buildBackup(entries, nextSettings, gmail.gmailData, exportedAt, muse.data)
     downloadText(`paceboard-backup-${exportedAt.slice(0, 10)}.json`, JSON.stringify(backup, null, 2), 'application/json')
     await onMarkBackup(exportedAt)
     setMessage('Full backup downloaded')
@@ -104,6 +107,7 @@ export function Settings({ entries, settings, gmail, onSave, onMarkBackup, onRes
       {error && <p className="form-error settings-error" role="alert">{error}</p>}
 
       <div className="settings-layout">
+        <MuseSettings muse={muse} />
         <GmailSettings gmail={gmail} />
         <form className="settings-section" onSubmit={savePreferences}>
           <div className="settings-heading"><span className="settings-icon"><Database size={20} /></span><div><h2>Tracking preferences</h2><p>Set the pace and vocabulary that fit your search.</p></div></div>

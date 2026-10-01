@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, BarChart3, BriefcaseBusiness, ChevronRight, CircleCheck, Inbox, LayoutDashboard, Plus, Search, Settings as SettingsIcon } from 'lucide-react'
+import { AlertTriangle, BarChart3, Bot, BriefcaseBusiness, ChevronRight, CircleCheck, Inbox, LayoutDashboard, Mail, Plus, Search, Settings as SettingsIcon } from 'lucide-react'
 import { Analytics } from './components/Analytics'
 import { ApplicationDrawer } from './components/ApplicationDrawer'
 import { Applications, type ApplicationViewCommand } from './components/Applications'
 import { GmailReview } from './components/GmailReview'
+import { MuseReview } from './components/MuseReview'
 import { Onboarding } from './components/Onboarding'
 import { Overview } from './components/Overview'
 import { Settings } from './components/Settings'
@@ -16,6 +17,9 @@ import type { ApplicationEntry, ApplicationFilterState, AppSettings, GmailCandid
 import { createGmailApiClient, type GmailApiClient } from './gmail/api'
 import { createGmailAuthClient, type GmailAuthClient } from './gmail/auth'
 import { useGmailImport, type GmailReviewInput, type GmailStatusReviewInput } from './hooks/useGmailImport'
+import { useMuseSync } from './hooks/useMuseSync'
+import { createMuseRelayClient, type MuseRelayClient } from './muse/client'
+import { getMuseKey } from './muse/keyStore'
 import { trackerRepository, type TrackerRepository } from './storage/repository'
 import { downloadText } from './utils/download'
 
@@ -23,14 +27,17 @@ interface AppProps {
   repository?: TrackerRepository
   gmailAuth?: GmailAuthClient
   gmailApiFactory?: (getAccessToken: () => string | null) => GmailApiClient
+  museClient?: MuseRelayClient
+  musePollIntervalMs?: number
 }
 type Page = 'overview' | 'applications' | 'review' | 'analytics' | 'settings'
 interface ToastState { message: string; undoEntries?: ApplicationEntry[] }
 
 const defaultGmailAuth = createGmailAuthClient(import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '')
 const defaultGmailApiFactory = (getAccessToken: () => string | null) => createGmailApiClient(getAccessToken)
+const defaultMuseClient = createMuseRelayClient({ getKey: getMuseKey })
 
-export function App({ repository = trackerRepository, gmailAuth = defaultGmailAuth, gmailApiFactory = defaultGmailApiFactory }: AppProps) {
+export function App({ repository = trackerRepository, gmailAuth = defaultGmailAuth, gmailApiFactory = defaultGmailApiFactory, museClient = defaultMuseClient, musePollIntervalMs }: AppProps) {
   const [entries, setEntries] = useState<ApplicationEntry[]>([])
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [page, setPage] = useState<Page>('overview')
@@ -40,6 +47,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   const [drawerEntry, setDrawerEntry] = useState<ApplicationEntry | undefined>()
   const [toast, setToast] = useState<ToastState | null>(null)
   const [fatalError, setFatalError] = useState('')
+  const [reviewSource, setReviewSource] = useState<'gmail' | 'muse'>()
   const scrollPositions = useRef<Record<Page, number>>({ overview: 0, applications: 0, review: 0, analytics: 0, settings: 0 })
   const commandId = useRef(0)
 
@@ -55,6 +63,8 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
 
   const gmail = useGmailImport(repository, gmailAuth, gmailApiFactory, load)
   const { lastResult: gmailResult, clearLastResult: clearGmailResult } = gmail
+  const muse = useMuseSync({ repository, client: museClient, entries, settings, onEntriesChanged: load, pollIntervalMs: musePollIntervalMs })
+  const { lastResult: museResult, clearLastResult: clearMuseResult } = muse
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
@@ -68,6 +78,12 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
     setToast({ message: `${matches}${skipped}` })
     clearGmailResult()
   }, [gmailResult, clearGmailResult])
+  useEffect(() => {
+    if (!museResult) return
+    const message = describeMusePull(museResult.summary)
+    if (message) setToast({ message })
+    clearMuseResult()
+  }, [museResult, clearMuseResult])
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
@@ -139,7 +155,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
 
   async function restore(raw: string, mode: 'merge' | 'replace', choices?: RestoreChoices) {
     await repository.restoreFromJson(raw, mode, choices)
-    await Promise.all([load(), gmail.refresh()])
+    await Promise.all([load(), gmail.refresh(), muse.refresh()])
   }
 
   async function acceptGmailCandidate(candidate: GmailCandidate, input: GmailReviewInput) {
@@ -171,7 +187,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
     if (!settings) return
     const exportedAt = new Date().toISOString()
     const backupSettings = { ...settings, lastBackupAt: exportedAt, lastBackupChangeCount: settings.changeCount ?? 0 }
-    downloadText(`paceboard-backup-${exportedAt.slice(0, 10)}.json`, JSON.stringify(buildBackup(entries, backupSettings, gmail.gmailData, exportedAt), null, 2), 'application/json')
+    downloadText(`paceboard-backup-${exportedAt.slice(0, 10)}.json`, JSON.stringify(buildBackup(entries, backupSettings, gmail.gmailData, exportedAt, muse.data), null, 2), 'application/json')
     await markBackup(exportedAt)
     setToast({ message: 'Full backup downloaded' })
   }
@@ -188,6 +204,12 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
       ? `${changesSinceBackup} ${changesSinceBackup === 1 ? 'change' : 'changes'} since your last backup.`
       : 'Your last backup is over 14 days old.'
   const week = getWeekSummary(entries, settings.weeklyTarget, new Date(), settings.applicationDays)
+  const reviewCount = gmail.pendingCandidates.length + muse.pendingItems.length
+  const activeReviewSource = reviewSource ?? (gmail.pendingCandidates.length === 0 && muse.pendingItems.length > 0 ? 'muse' : 'gmail')
+  const reviewSwitcher = <div className="source-switch" role="group" aria-label="Review source">
+    <button type="button" aria-pressed={activeReviewSource === 'gmail'} onClick={() => setReviewSource('gmail')}><Mail size={15} /> Gmail <span>{gmail.pendingCandidates.length}</span></button>
+    <button type="button" aria-pressed={activeReviewSource === 'muse'} onClick={() => setReviewSource('muse')}><Bot size={15} /> Muse <span>{muse.pendingItems.length}</span></button>
+  </div>
   const pageLabels: Record<Page, string> = { overview: 'Overview', applications: 'Applications', review: 'Review', analytics: 'Analytics', settings: 'Settings & data' }
 
   return (
@@ -198,7 +220,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
         <nav aria-label="Primary navigation">
           <NavButton label="Overview" active={page === 'overview'} icon={<LayoutDashboard size={19} />} onClick={() => navigate('overview')} />
           <NavButton label="Applications" active={page === 'applications'} icon={<BriefcaseBusiness size={19} />} onClick={() => navigate('applications')} />
-          <NavButton label="Review" count={gmail.pendingCandidates.length} active={page === 'review'} icon={<Inbox size={19} />} onClick={() => navigate('review')} />
+          <NavButton label="Review" count={reviewCount} active={page === 'review'} icon={<Inbox size={19} />} onClick={() => navigate('review')} />
           <NavButton label="Analytics" active={page === 'analytics'} icon={<BarChart3 size={19} />} onClick={() => navigate('analytics')} />
           <NavButton label="Settings & data" active={page === 'settings'} icon={<SettingsIcon size={19} />} onClick={() => navigate('settings')} />
         </nav>
@@ -211,15 +233,17 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
         {needsBackup && page !== 'settings' && <button type="button" className="backup-warning" onClick={() => void downloadBackupNow().catch(() => setToast({ message: 'Backup could not be downloaded. Try again from Settings & data.' }))}><AlertTriangle size={15} /><span>{backupWarning}</span><strong>Download backup <ChevronRight size={14} /></strong></button>}
         {page === 'overview' && <Overview entries={entries} settings={settings} onAdd={addApplication} onEdit={editApplication} onUpdateEntry={(next, previous, message) => updateEntries([next], [previous], message)} onOpenApplications={openApplications} />}
         <div hidden={page !== 'applications'}><Applications entries={entries} settings={settings} viewCommand={applicationViewCommand} onAdd={addApplication} onEdit={editApplication} onUpdateEntries={updateEntries} onSaveSettings={saveSettings} /></div>
-        {page === 'review' && <GmailReview candidates={gmail.pendingCandidates} dismissedCandidates={gmail.dismissedCandidates} entries={entries} onAccept={acceptGmailCandidate} onLink={gmail.linkCandidate} onAcceptStatus={acceptGmailStatus} onDismiss={gmail.dismissCandidate} onRestore={gmail.restoreCandidate} />}
+        {page === 'review' && (activeReviewSource === 'muse'
+          ? <MuseReview muse={muse} entries={entries} switcher={reviewSwitcher} />
+          : <GmailReview candidates={gmail.pendingCandidates} dismissedCandidates={gmail.dismissedCandidates} entries={entries} onAccept={acceptGmailCandidate} onLink={gmail.linkCandidate} onAcceptStatus={acceptGmailStatus} onDismiss={gmail.dismissCandidate} onRestore={gmail.restoreCandidate} switcher={reviewSwitcher} />)}
         {page === 'analytics' && <Analytics entries={entries} onOpenApplications={openApplications} />}
-        {page === 'settings' && <Settings entries={entries} settings={settings} gmail={gmail} onSave={saveSettings} onMarkBackup={markBackup} onRestore={restore} />}
+        {page === 'settings' && <Settings entries={entries} settings={settings} gmail={gmail} muse={muse} onSave={saveSettings} onMarkBackup={markBackup} onRestore={restore} />}
       </main>
 
       {searchOpen && <CommandMenu entries={entries} actions={[
         { id: 'add', label: 'Add application', detail: 'Log a new role', icon: <Plus size={19} />, run: addApplication },
         { id: 'applications', label: 'Applications', detail: 'Search and manage your roles', icon: <BriefcaseBusiness size={19} />, run: () => openApplications({}) },
-        { id: 'review', label: 'Review Gmail matches', detail: `${gmail.pendingCandidates.length} pending matches`, icon: <Inbox size={19} />, run: () => navigate('review') },
+        { id: 'review', label: 'Review updates', detail: `${reviewCount} waiting from Gmail and Muse`, icon: <Inbox size={19} />, run: () => navigate('review') },
         { id: 'analytics', label: 'Analytics', detail: 'Explore your application patterns', icon: <BarChart3 size={19} />, run: () => navigate('analytics') },
         { id: 'settings', label: 'Settings & data', detail: 'Preferences, Gmail, and backups', icon: <SettingsIcon size={19} />, run: () => navigate('settings') },
       ]} onEdit={editApplication} onSearchApplications={(query) => openApplications({ query })} onClose={() => setSearchOpen(false)} />}
@@ -227,6 +251,17 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
       {toast && <div className="toast" role="status"><span>{toast.message}</span>{toast.undoEntries && <button type="button" onClick={undoChange}>Undo</button>}<button type="button" className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss notification">×</button></div>}
     </div>
   )
+}
+
+function describeMusePull(summary: { created: number; filled: number; statuses: number; review: number }): string {
+  const parts = [
+    summary.created && `${summary.created} ${summary.created === 1 ? 'role' : 'roles'} added`,
+    summary.statuses && `${summary.statuses} status ${summary.statuses === 1 ? 'update' : 'updates'}`,
+    summary.filled && `${summary.filled} ${summary.filled === 1 ? 'role' : 'roles'} filled in`,
+  ].filter(Boolean)
+  const review = summary.review ? `${summary.review} ${summary.review === 1 ? 'needs' : 'need'} review` : ''
+  if (!parts.length && !review) return ''
+  return `Muse: ${[parts.join(', '), review].filter(Boolean).join(' · ')}`
 }
 
 function NavButton({ label, count, active, icon, onClick }: { label: string; count?: number; active: boolean; icon: React.ReactNode; onClick: () => void }) {

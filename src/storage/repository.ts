@@ -287,6 +287,14 @@ export class TrackerRepository {
     await this.db.museSync.put(state)
   }
 
+  async patchMuseSyncState(patch: Partial<Omit<MuseSyncState, 'key'>>): Promise<MuseSyncState> {
+    return this.db.transaction('rw', this.db.museSync, async () => {
+      const next = { ...(await this.db.museSync.get('muse') ?? emptyMuseData().syncState), ...patch, key: 'muse' as const }
+      await this.db.museSync.put(next)
+      return next
+    })
+  }
+
   async commitMuseIngest(commit: MuseIngestCommit): Promise<void> {
     await this.db.transaction(
       'rw',

@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ExternalLink, Inbox, Link2, MailCheck, RotateCcw, Search, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { findPossibleDuplicate, rankGmailApplicationMatches } from '../domain/gmail'
 import { getDisplayStatus, statusLabel } from '../domain/status'
 import type { ApplicationEffort, ApplicationEntry, ApplicationStatus, GmailCandidate } from '../domain/types'
@@ -16,6 +16,7 @@ interface GmailReviewProps {
   onAcceptStatus: (candidate: GmailCandidate, input: GmailStatusReviewInput) => Promise<void>
   onDismiss: (candidate: GmailCandidate) => Promise<void>
   onRestore: (candidate: GmailCandidate) => Promise<void>
+  switcher?: ReactNode
 }
 
 interface ReviewDraft {
@@ -30,7 +31,7 @@ interface ReviewDraft {
   editing: boolean
 }
 
-export function GmailReview({ candidates, dismissedCandidates, entries, onAccept, onLink, onAcceptStatus, onDismiss, onRestore }: GmailReviewProps) {
+export function GmailReview({ candidates, dismissedCandidates, entries, onAccept, onLink, onAcceptStatus, onDismiss, onRestore, switcher }: GmailReviewProps) {
   const [index, setIndex] = useState(0)
   const [tab, setTab] = useState<'pending' | 'dismissed'>('pending')
   const [drafts, setDrafts] = useState<Record<string, ReviewDraft>>({})
@@ -50,6 +51,7 @@ export function GmailReview({ candidates, dismissedCandidates, entries, onAccept
         <div><p className="context-label">Email-assisted updates</p><h1>Review Gmail matches</h1><p>Every suggestion stays pending until you confirm the application and event.</p></div>
         {candidates.length > 0 && <span className="review-total"><Inbox size={17} /> {candidates.length} pending</span>}
       </header>
+      {switcher}
 
       <div className="review-tabs" role="tablist"><button type="button" role="tab" aria-selected={tab === 'pending'} className={tab === 'pending' ? 'active' : ''} onClick={() => setTab('pending')}>Pending <span>{candidates.length}</span></button><button type="button" role="tab" aria-selected={tab === 'dismissed'} className={tab === 'dismissed' ? 'active' : ''} onClick={() => setTab('dismissed')}>Dismissed <span>{dismissedCandidates.length}</span></button></div>
 
@@ -189,7 +191,7 @@ function ReviewCard({ candidate, entries, draft: storedDraft, onDraft, position,
   )
 }
 
-function ApplicationPicker({ entries, recommendedIds, selectedId, query, onQuery, onSelect }: {
+export function ApplicationPicker({ entries, recommendedIds, selectedId, query, onQuery, onSelect }: {
   entries: ApplicationEntry[]
   recommendedIds: string[]
   selectedId: string

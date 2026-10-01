@@ -9,7 +9,7 @@ export type RestoreChoices = Record<string, 'current' | 'backup'>
 
 export function findRestoreConflicts(current: ApplicationEntry[], backup: ApplicationEntry[]): RestoreConflict[] {
   return backup.flatMap((incoming) => {
-    const match = current.find((entry) => entry.id === incoming.id || identity(entry) === identity(incoming))
+    const match = current.find((entry) => entry.id === incoming.id || entryIdentity(entry) === entryIdentity(incoming))
     return match ? [{ backup: incoming, current: match }] : []
   })
 }
@@ -21,7 +21,7 @@ export function mergeApplicationEntries(
 ): ApplicationEntry[] {
   const merged = [...current]
   for (const incoming of backup) {
-    const index = merged.findIndex((entry) => entry.id === incoming.id || identity(entry) === identity(incoming))
+    const index = merged.findIndex((entry) => entry.id === incoming.id || entryIdentity(entry) === entryIdentity(incoming))
     if (index < 0) {
       merged.push(incoming)
     } else if (choices[incoming.id] === 'backup') {
@@ -31,7 +31,7 @@ export function mergeApplicationEntries(
   return merged
 }
 
-function identity(entry: ApplicationEntry): string {
+export function entryIdentity(entry: Pick<ApplicationEntry, 'company' | 'title' | 'submittedDate'>): string {
   return `${normalize(entry.company)}|${normalize(entry.title)}|${entry.submittedDate}`
 }
 

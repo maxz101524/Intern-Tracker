@@ -1,3 +1,5 @@
+import type { MuseEntryPayload, MuseStatusPayload } from '../../shared/museContract'
+
 export type ApplicationEffort = 'quick' | 'targeted'
 
 export type ApplicationStatus =
@@ -127,10 +129,63 @@ export interface GmailImportData {
   syncState: GmailSyncState
 }
 
+export type MuseItemState = 'applied' | 'pending' | 'dismissed' | 'skipped'
+
+export type MuseReviewReason =
+  | 'invalid'
+  | 'possible_duplicate'
+  | 'unmatched'
+  | 'low_confidence'
+  | 'closed_application'
+  | 'undone'
+
+export type MuseFillField = 'url' | 'source' | 'resumeVariant' | 'notes' | 'origin'
+
+interface MuseItemBase {
+  key: string
+  batchId: string
+  streamId: string
+  state: MuseItemState
+  reason?: MuseReviewReason
+  detail?: string
+  suggestedEntryIds?: string[]
+  receivedAt: string
+  reviewedAt?: string
+}
+
+export interface MuseEntryItem extends MuseItemBase {
+  kind: 'entry'
+  payload: MuseEntryPayload
+  result?: { entryId: string; action: 'created' | 'filled'; filledFields?: MuseFillField[] }
+}
+
+export interface MuseStatusItem extends MuseItemBase {
+  kind: 'status'
+  payload: MuseStatusPayload
+  result?: { entryId: string; action: 'status_added' }
+}
+
+export type MuseItem = MuseEntryItem | MuseStatusItem
+
+export interface MuseSyncState {
+  key: 'muse'
+  cursor?: string
+  lastPulledAt?: string
+  lastLedgerHash?: string
+  lastLedgerPublishedAt?: string
+  retentionGap?: boolean
+}
+
+export interface MuseData {
+  items: MuseItem[]
+  syncState: MuseSyncState
+}
+
 export interface TrackerBackup {
   version: 4
   exportedAt: string
   entries: ApplicationEntry[]
   settings: AppSettings
   gmail: GmailImportData
+  muse?: MuseData
 }

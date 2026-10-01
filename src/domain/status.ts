@@ -57,6 +57,7 @@ export function appendStatus(
   status: ApplicationStatus,
   date: string,
   origin?: ApplicationOrigin,
+  id: string = crypto.randomUUID(),
 ): ApplicationEntry {
   if (!isApplicationStatus(status)) throw new Error('Application status is not valid.')
   if (!isValidDateOnly(date)) throw new Error('Status date is not valid.')
@@ -68,9 +69,7 @@ export function appendStatus(
   }
   if (getCurrentStatus(entry) === status) return entry
 
-  const nextEvent: StatusEvent = origin
-    ? { id: crypto.randomUUID(), status, date, origin }
-    : { id: crypto.randomUUID(), status, date }
+  const nextEvent: StatusEvent = origin ? { id, status, date, origin } : { id, status, date }
   const statusHistory = [...entry.statusHistory, nextEvent]
     .map((event, index) => ({ event, index }))
     .sort((a, b) => a.event.date.localeCompare(b.event.date) || a.index - b.index)

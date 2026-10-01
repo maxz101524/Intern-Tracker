@@ -1,6 +1,6 @@
 import { Info } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { buildWeeklySeries, getEffortPerformance, getOutcomeMetrics, getPipelineSummary, getSourcePerformance } from '../domain/analytics'
+import { buildWeeklySeries, getEffortPerformance, getOutcomeMetrics, getPipelineSummary, getResumePerformance, getSourcePerformance } from '../domain/analytics'
 import { statusLabel, todayDate } from '../domain/status'
 import type { ApplicationEntry, ApplicationFilterState, DisplayStatus } from '../domain/types'
 
@@ -25,6 +25,7 @@ export function Analytics({ entries, onOpenApplications }: {
   const pipeline = getPipelineSummary(rangedEntries, today)
   const effort = getEffortPerformance(rangedEntries)
   const sources = getSourcePerformance(rangedEntries).sort((a, b) => b.total - a.total)
+  const resumes = getResumePerformance(rangedEntries).sort((a, b) => b.total - a.total)
   const maxWeek = Math.max(1, ...weekly.map(({ total }) => total))
   const maxPipeline = Math.max(1, ...Object.values(pipeline))
   const rangeFilters = { fromDate: dates.from, toDate: dates.to }
@@ -54,19 +55,21 @@ export function Analytics({ entries, onOpenApplications }: {
         <section className="panel distribution-panel"><div className="section-heading"><div><h2>Pipeline distribution</h2><p>Select a row to open that filtered ledger.</p></div></div><div className="distribution-list">{pipelineOrder.map((status) => <button type="button" key={status} onClick={() => onOpenApplications({ ...rangeFilters, status })}><span>{statusLabel(status)}</span><i><b className={`status-${status}`} style={{ width: `${pipeline[status] / maxPipeline * 100}%` }} /></i><strong>{pipeline[status]}</strong></button>)}</div></section>
       </div>
 
-      <PerformanceSection title="Effort comparison" description="Counts and rates by the time invested." rows={effort.map((row) => ({ ...row, name: row.effort === 'quick' ? 'Quick' : 'Targeted' }))} />
-      <PerformanceSection title="Source performance" description="Counts and rates by application channel." rows={sources.map((row) => ({ ...row, name: row.source }))} empty="No source data yet." />
+      <PerformanceSection title="Resume performance" label="Resume" description="Which resume version earns replies and progress." rows={resumes.map((row) => ({ ...row, name: row.resumeVariant }))} empty="No resume data yet." />
+      <PerformanceSection title="Source performance" label="Source" description="Counts and rates by application channel." rows={sources.map((row) => ({ ...row, name: row.source }))} empty="No source data yet." />
+      <PerformanceSection title="Effort comparison" label="Effort" description="Counts and rates by the time invested." rows={effort.map((row) => ({ ...row, name: row.effort === 'quick' ? 'Quick' : 'Targeted' }))} />
     </div>
   )
 }
 
-function PerformanceSection({ title, description, rows, empty }: {
+function PerformanceSection({ title, label, description, rows, empty }: {
   title: string
+  label: string
   description: string
   rows: Array<{ name: string; total: number; responses: number; responseRate: number; progressed: number; progressedRate: number; rejected: number; rejectedRate: number }>
   empty?: string
 }) {
-  return <section className="panel performance-section"><div className="section-heading"><div><h2>{title}</h2><p>{description}</p></div></div>{rows.length ? <div className="performance-table clearer"><div className="performance-head"><span>{title.startsWith('Effort') ? 'Effort' : 'Source'}</span><span>Applications</span><span>Any response</span><span>Progressed</span><span>Rejected</span></div>{rows.map((row) => <div className="performance-row" key={row.name}><strong>{row.name}</strong><span>{row.total}</span><span>{row.responses} <small>{row.responseRate}%</small></span><span>{row.progressed} <small>{row.progressedRate}%</small></span><span>{row.rejected} <small>{row.rejectedRate}%</small></span></div>)}</div> : <div className="empty-state"><strong>{empty ?? 'No data in this range.'}</strong><span>Adjust the submission range to compare results.</span></div>}</section>
+  return <section className="panel performance-section"><div className="section-heading"><div><h2>{title}</h2><p>{description}</p></div></div>{rows.length ? <div className="performance-table clearer"><div className="performance-head"><span>{label}</span><span>Applications</span><span>Any response</span><span>Progressed</span><span>Rejected</span></div>{rows.map((row) => <div className="performance-row" key={row.name}><strong>{row.name}</strong><span>{row.total}</span><span>{row.responses} <small>{row.responseRate}%</small></span><span>{row.progressed} <small>{row.progressedRate}%</small></span><span>{row.rejected} <small>{row.rejectedRate}%</small></span></div>)}</div> : <div className="empty-state"><strong>{empty ?? 'No data in this range.'}</strong><span>Adjust the submission range to compare results.</span></div>}</section>
 }
 
 function MetricButton({ label, count, rate, detail, onClick }: { label: string; count: number; rate?: number; detail?: string; onClick: () => void }) {

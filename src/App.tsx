@@ -201,12 +201,12 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   if (settings.weeklyTarget === 0) return <Onboarding onSave={(weeklyTarget) => saveSettings({ ...settings, weeklyTarget })} />
 
   const changesSinceBackup = Math.max(0, (settings.changeCount ?? 0) - (settings.lastBackupChangeCount ?? 0))
-  const needsBackup = entries.length > 0 && (changesSinceBackup > 0 || !settings.lastBackupAt || Date.now() - new Date(settings.lastBackupAt).getTime() > 14 * 86_400_000)
+  // Muse writes many small changes a day, so nudge weekly instead of after every sync.
+  const backupAgeDays = settings.lastBackupAt ? (Date.now() - new Date(settings.lastBackupAt).getTime()) / 86_400_000 : Infinity
+  const needsBackup = entries.length > 0 && (!settings.lastBackupAt || (changesSinceBackup > 0 && backupAgeDays > 7))
   const backupWarning = !settings.lastBackupAt
-    ? 'No full backup has been downloaded.'
-    : changesSinceBackup > 0
-      ? `${changesSinceBackup} ${changesSinceBackup === 1 ? 'change' : 'changes'} since your last backup.`
-      : 'Your last backup is over 14 days old.'
+    ? 'Your applications live only in this browser. Download a backup to keep a copy.'
+    : `${changesSinceBackup} ${changesSinceBackup === 1 ? 'change' : 'changes'} since your last backup ${Math.floor(backupAgeDays)} days ago.`
   const week = getWeekSummary(entries, settings.weeklyTarget, new Date(), settings.applicationDays)
   const reviewCount = gmail.pendingCandidates.length + muse.pendingItems.length
   const reviewSwitcher = <div className="source-switch" role="group" aria-label="Review source">
@@ -228,13 +228,15 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
           <NavButton label="Settings & data" active={page === 'settings'} icon={<SettingsIcon size={19} />} onClick={() => navigate('settings')} />
         </nav>
         <button type="button" className="sidebar-pace" onClick={() => navigate('overview')} aria-label="Open weekly pace"><span>This week <strong>{week.submitted}<small> / {settings.weeklyTarget}</small></strong></span><span className="sidebar-progress"><i style={{ width: `${Math.min(100, week.submitted / settings.weeklyTarget * 100)}%` }} /></span><small>{week.remaining ? `${week.remaining} applications to your goal` : 'Weekly goal reached'}</small></button>
-        <div className="sidebar-meta"><CircleCheck size={16} /><div><span>Local workspace</span><small>Saved in this browser</small></div></div>
+        {muse.connected
+          ? <button type="button" className={`sidebar-meta sidebar-sync ${muse.status === 'error' ? 'is-error' : ''}`} onClick={() => navigate('settings')} aria-label="Open Muse sync settings"><Bot size={16} /><div><span>{muse.status === 'error' ? 'Muse sync paused' : muse.status === 'syncing' ? 'Syncing with Muse…' : 'Muse connected'}</span><small>{muse.status === 'error' ? 'Open settings to fix' : lastPullLabel(muse.data.syncState.lastPulledAt)}</small></div></button>
+          : <div className="sidebar-meta"><CircleCheck size={16} /><div><span>Local workspace</span><small>Saved in this browser</small></div></div>}
       </aside>
 
       <main className="main-area" id="workspace-content" tabIndex={-1}>
         <div className="workspace-bar"><div className="workspace-breadcrumb"><span>My workspace</span><ChevronRight size={14} /><strong>{pageLabels[page]}</strong></div><button type="button" className="workspace-search" onClick={() => setSearchOpen(true)} aria-label="Search workspace"><Search size={16} /><span>Find anything</span><kbd>⌘ K</kbd></button><time className="workspace-date" dateTime={new Date().toLocaleDateString('en-CA')}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' })}</time></div>
         {needsBackup && page !== 'settings' && <button type="button" className="backup-warning" onClick={() => void downloadBackupNow().catch(() => setToast({ message: 'Backup could not be downloaded. Try again from Settings & data.' }))}><AlertTriangle size={15} /><span>{backupWarning}</span><strong>Download backup <ChevronRight size={14} /></strong></button>}
-        {page === 'overview' && <Overview entries={entries} settings={settings} onAdd={addApplication} onEdit={editApplication} onUpdateEntry={(next, previous, message) => updateEntries([next], [previous], message)} onOpenApplications={openApplications} />}
+        {page === 'overview' && <Overview entries={entries} settings={settings} reviewCount={reviewCount} onOpenReview={() => navigate('review')} onAdd={addApplication} onEdit={editApplication} onUpdateEntry={(next, previous, message) => updateEntries([next], [previous], message)} onOpenApplications={openApplications} />}
         <div hidden={page !== 'applications'}><Applications entries={entries} settings={settings} viewCommand={applicationViewCommand} onAdd={addApplication} onEdit={editApplication} onUpdateEntries={updateEntries} onSaveSettings={saveSettings} /></div>
         {page === 'review' && (reviewSource === 'muse'
           ? <MuseReview muse={muse} entries={entries} switcher={reviewSwitcher} />
@@ -254,6 +256,15 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
       {toast && <div className="toast" role="status"><span>{toast.message}</span>{toast.undoEntries && <button type="button" onClick={undoChange}>Undo</button>}<button type="button" className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss notification">×</button></div>}
     </div>
   )
+}
+
+function lastPullLabel(lastPulledAt?: string): string {
+  if (!lastPulledAt) return 'Waiting for first pull'
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(lastPulledAt)) / 60_000))
+  if (minutes < 1) return 'Checked just now'
+  if (minutes < 60) return `Checked ${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  return hours < 24 ? `Checked ${hours} h ago` : `Checked ${new Date(lastPulledAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 }
 
 function describeMusePull(summary: { created: number; filled: number; statuses: number; review: number }): string {

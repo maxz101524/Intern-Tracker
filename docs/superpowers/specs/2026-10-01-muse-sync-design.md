@@ -103,14 +103,16 @@ Keys travel as `Authorization: Bearer <key>` and are compared in constant time o
     "date": "2026-10-03",
     "origin": { "provider": "gmail", "messageId": "…" },
     "confidence": "high",
-    "note": "HackerRank, due Oct 8"
+    "note": "HackerRank",
+    "dueDate": "2026-10-08"
   }]
 }
 ```
 
 - `newEntries` use the v4 `ApplicationEntry` shape. `id`, `company`, `title`, `submittedDate` (Eastern date), and `effort` are required. `statusHistory` may be omitted, in which case Paceboard creates the `applied` event. Later statuses always arrive as `statusUpdates`.
 - `statusUpdates` require `id`, `status` (any status except `applied`), `date`, and either `entryId` or `match`. `confidence` defaults to `high`. A `low` confidence update always goes to Review.
-- `note` appears in Muse activity and on review cards. It is never written into the entry.
+- `note` appears in Muse activity and on review cards. It is never written into the entry on its own.
+- `dueDate` (optional, `YYYY-MM-DD`) marks a deadline for an assessment, screen, interview, or offer. When the role has no open next action, Paceboard creates one, for example "Complete the online assessment — HackerRank" due on that date, so it surfaces under Needs attention. An existing plan is never replaced, and undo removes only the action Muse created.
 - Muse should use the source and resume-variant labels published in the ledger's `vocabulary`.
 
 ## Paceboard ingest

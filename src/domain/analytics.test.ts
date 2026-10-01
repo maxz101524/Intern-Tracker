@@ -1,15 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createApplication } from './entries'
 import { appendStatus } from './status'
-import {
-  buildDailySeries,
-  buildWeeklySeries,
-  getEffortPerformance,
-  getOutcomeMetrics,
-  getPipelineSummary,
-  getSourcePerformance,
-  getWeekSummary,
-} from './analytics'
+import { buildDailySeries, buildWeeklySeries, getEffortPerformance, getOutcomeMetrics, getPipelineSummary, getSourcePerformance, getWeekSummary, getResumePerformance } from './analytics'
 import type { ApplicationEffort } from './types'
 
 function entry(id: string, submittedDate: string, effort: ApplicationEffort = 'quick', source?: string) {
@@ -82,6 +74,21 @@ describe('singular application analytics', () => {
     expect(getSourcePerformance([progressed, waiting])).toEqual([
       expect.objectContaining({ source: 'LinkedIn', total: 1 }),
       expect.objectContaining({ source: 'Referral', total: 1, responses: 1, interviews: 1 }),
+    ])
+  })
+})
+
+describe('resume performance', () => {
+  it('groups outcomes by resume variant and labels missing ones', () => {
+    const make = (id: string, resumeVariant?: string) => createApplication({ id, company: id, title: 'Intern', submittedDate: '2026-09-01', effort: 'quick', resumeVariant })
+    const rows = getResumePerformance([
+      appendStatus(make('a', 'ML'), 'interview', '2026-09-05'),
+      make('b', 'ML'),
+      appendStatus(make('c', 'DS'), 'rejected', '2026-09-04'),
+      make('d'),
+    ])
+    expect(rows.map(({ resumeVariant, total, progressed, rejected }) => [resumeVariant, total, progressed, rejected])).toEqual([
+      ['DS', 1, 0, 1], ['ML', 2, 1, 0], ['Not recorded', 1, 0, 0],
     ])
   })
 })

@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApplication } from '../domain/entries'
-import { todayDate } from '../domain/status'
+import { appendStatus, todayDate } from '../domain/status'
 import type { ApplicationEntry } from '../domain/types'
 import { Overview } from './Overview'
 
@@ -17,11 +17,12 @@ function makeAction(id: string, offset?: number): ApplicationEntry {
   })
 }
 
-function renderOverview(entries: ApplicationEntry[], onUpdateEntry = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)) {
+function renderOverview(entries: ApplicationEntry[], onUpdateEntry = vi.fn<(next: ApplicationEntry) => Promise<void>>().mockResolvedValue(undefined), reviewCount = 0) {
   const onOpenApplications = vi.fn()
   const onAdd = vi.fn()
-  render(<Overview entries={entries} settings={{ weeklyTarget: 20, sources: [], lastBackupAt: null }} onAdd={onAdd} onEdit={vi.fn()} onUpdateEntry={onUpdateEntry} onOpenApplications={onOpenApplications} />)
-  return { onOpenApplications, onAdd, onUpdateEntry }
+  const onOpenReview = vi.fn()
+  render(<Overview entries={entries} settings={{ weeklyTarget: 20, sources: [], lastBackupAt: null }} reviewCount={reviewCount} onOpenReview={onOpenReview} onAdd={onAdd} onEdit={vi.fn()} onUpdateEntry={onUpdateEntry} onOpenApplications={onOpenApplications} />)
+  return { onOpenApplications, onAdd, onUpdateEntry, onOpenReview }
 }
 
 describe('Overview next actions and ledger navigation', () => {
@@ -30,7 +31,7 @@ describe('Overview next actions and ledger navigation', () => {
     renderOverview([makeAction('undated'), makeAction('later', 12), makeAction('soon', 4), makeAction('today', 0), makeAction('older', -3), makeAction('overdue', -1)])
     const focus = within(screen.getByRole('region', { name: 'Needs attention' }))
 
-    expect(focus.getAllByRole('article')).toHaveLength(4)
+    expect(focus.getAllByRole('article')).toHaveLength(5)
     expect(focus.getAllByRole('article')[0]).toHaveAccessibleName('Next step older for older')
     expect(focus.queryByText('Next step undated')).not.toBeInTheDocument()
     await user.click(focus.getByRole('button', { name: 'Show all actions' }))
@@ -80,5 +81,26 @@ describe('Overview next actions and ledger navigation', () => {
     expect(onAdd).toHaveBeenCalledOnce()
     await user.click(screen.getByRole('button', { name: /0 applications, today$/ }))
     expect(onOpenApplications).toHaveBeenCalledWith({ fromDate: todayDate(), toDate: todayDate() })
+  })
+})
+
+describe('Overview employer steps and responses', () => {
+  it('lists assessments and interviews as actions and records Done on the role', async () => {
+    const user = userEvent.setup()
+    const submitted = todayDate(new Date(Date.now() - 6 * 86_400_000))
+    const interview = appendStatus(createApplication({ id: 'int', company: 'Northwind', title: 'ML Intern', submittedDate: submitted, effort: 'quick' }), 'interview', todayDate())
+    const { onUpdateEntry, onOpenReview } = renderOverview([interview], undefined, 2)
+    const focus = within(screen.getByRole('region', { name: 'Needs attention' }))
+
+    expect(focus.getByRole('article', { name: 'Prepare for the interview for Northwind' })).toBeVisible()
+    await user.click(focus.getByRole('button', { name: /2 updates need a decision/ }))
+    expect(onOpenReview).toHaveBeenCalledOnce()
+    await user.click(focus.getByRole('button', { name: 'Done' }))
+    expect(onUpdateEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ nextAction: 'Prepare for the interview', nextActionCompleted: true }),
+      interview,
+      'Prepare for the interview marked done',
+    )
+    expect(screen.getByRole('region', { name: 'Latest responses' })).toHaveTextContent('Northwind')
   })
 })

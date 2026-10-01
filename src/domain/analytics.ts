@@ -47,6 +47,7 @@ export interface PerformanceRow {
 
 export interface EffortPerformance extends PerformanceRow { effort: ApplicationEffort }
 export interface SourcePerformance extends PerformanceRow { source: string }
+export interface ResumePerformance extends PerformanceRow { resumeVariant: string }
 
 export function getWeekSummary(
   entries: ApplicationEntry[],
@@ -172,6 +173,14 @@ export function getSourcePerformance(entries: ApplicationEntry[]): SourcePerform
   return sources.map((source) => ({
     source,
     ...performance(entries.filter((entry) => (entry.source ?? 'Not specified') === source)),
+  }))
+}
+
+export function getResumePerformance(entries: ApplicationEntry[]): ResumePerformance[] {
+  const variants = [...new Set(entries.map((entry) => entry.resumeVariant ?? 'Not recorded'))].sort()
+  return variants.map((resumeVariant) => ({
+    resumeVariant,
+    ...performance(entries.filter((entry) => (entry.resumeVariant ?? 'Not recorded') === resumeVariant)),
   }))
 }
 

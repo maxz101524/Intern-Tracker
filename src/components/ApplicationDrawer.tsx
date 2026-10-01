@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { AlertTriangle, Check, ChevronDown, ExternalLink, History, RotateCcw, Trash2, X } from 'lucide-react'
 import { createApplication } from '../domain/entries'
+import { formatShortDate } from '../domain/analytics'
 import { findPossibleDuplicate } from '../domain/gmail'
 import { APPLICATION_STATUSES, appendStatus, getCurrentStatus, getDisplayStatus, isApplicationStatus, statusLabel, todayDate } from '../domain/status'
 import type { ApplicationEffort, ApplicationEntry, ApplicationStatus, StatusEvent } from '../domain/types'
@@ -254,7 +255,10 @@ export function ApplicationDrawer({
           <button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Close application drawer"><X /></button>
         </header>
 
-        {entry && <div className="drawer-current-status"><span>Current status</span><StatusBadge status={displayStatus} /></div>}
+        {entry && <div className="drawer-current-status drawer-glance" aria-label="Application summary">
+          <div><StatusBadge status={displayStatus} /><span>{[`Submitted ${formatShortDate(entry.submittedDate)}`, entry.source, entry.resumeVariant && `${entry.resumeVariant} resume`].filter(Boolean).join(' · ')}</span>{entry.url && <a href={entry.url} target="_blank" rel="noreferrer">Open posting <ExternalLink size={13} /></a>}</div>
+          {entry.notes && <p>{entry.notes.split('\n')[0]}</p>}
+        </div>}
 
         <form ref={formRef} className="drawer-form" onSubmit={submit} noValidate>
           <div className="drawer-form-content">

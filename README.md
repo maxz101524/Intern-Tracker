@@ -27,6 +27,11 @@ record per role without turning the job search into a data-entry project.
   resolution, supporting email links, dismissed-item recovery, and no automatic writes.
 - Uses Gmail history checkpoints after a bounded 30-day first scan so later syncs
   inspect only new mailbox activity.
+- Receives roles and status changes from Muse, the agent that submits applications,
+  through a small keyed relay. Clean updates apply automatically with undo; possible
+  duplicates, unmatched updates, and low-confidence items wait in Review.
+- Shares a compact ledger (company, title, date, link, source, status history) back
+  with Muse so it can skip roles already tracked and target updates by role ID.
 - Stores data in IndexedDB in the current browser.
 - Exports complete JSON backups, previews merge/replace restores, and produces
   one-row-per-role CSV files.
@@ -97,6 +102,36 @@ Google requires a user gesture to issue a new browser token, so Paceboard syncs
 automatically only while its in-memory token remains valid; otherwise it presents
 **Reconnect Gmail & sync**.
 
+## Connect Muse sync
+
+Muse posts batches after each run to `POST /api/muse/batches`; Paceboard pulls them
+when it opens, when the tab regains focus, and every 10 minutes while open. The relay
+only stores and forwards: applications stay in this browser's IndexedDB.
+
+1. In the Vercel project, open **Storage → Marketplace**, add **Upstash for Redis**
+   (free tier), and connect it to this project. It injects the Redis REST env vars.
+2. Create two different long random keys, for example with `openssl rand -base64 32`,
+   and add them as environment variables: `MUSE_SYNC_KEY` and `PACEBOARD_SYNC_KEY`.
+3. Redeploy so the functions see the new variables.
+4. In Paceboard, open **Settings & data → Muse sync**, paste the Paceboard key, and
+   choose **Connect Muse**. The key stays in this browser's local storage only.
+5. Give Muse the Muse key and the contract below.
+
+| Endpoint | Key | Purpose |
+| --- | --- | --- |
+| `POST /api/muse/batches` | Muse | Append one `paceboard.muse-batch.v1` batch; re-posting a `batchId` is a no-op |
+| `GET /api/muse/batches?after=<cursor>` | Paceboard | Read batches after a cursor, 50 per page |
+| `GET /api/muse/ledger` | Muse | Read the `paceboard.ledger.v1` snapshot of tracked roles |
+| `PUT /api/muse/ledger` | Paceboard | Replace the ledger snapshot |
+
+The batch contract, auto-apply rules, and ledger format are documented in
+`docs/superpowers/specs/2026-10-01-muse-sync-design.md` and validated by
+`shared/museContract.ts`. Batches are retained for 90 days.
+
+For local development, `npm run dev` does not serve `/api`. Set
+`MUSE_RELAY_DEV_TARGET` in `.env.local` to the deployed origin to proxy relay calls, or
+run `vercel dev` to serve the functions locally.
+
 ## Deploy to Vercel
 
 The production Vercel project is connected to the GitHub repository. Pushing to
@@ -104,8 +139,11 @@ The production Vercel project is connected to the GitHub repository. Pushing to
 
 ## Data and privacy
 
-There is no Paceboard server, account, cookie, analytics SDK, or application-data
-backend. Gmail access goes directly from the current browser to Google's APIs.
+There is no Paceboard account, cookie, analytics SDK, or application-data backend.
+Gmail access goes directly from the current browser to Google's APIs. The optional
+Muse relay holds only Muse's incoming batches (90-day retention) and the compact
+ledger; notes, next actions, job-description excerpts, and Gmail data never leave the
+browser. The Paceboard sync key lives in local storage and is never exported.
 Access tokens stay in memory and never enter IndexedDB or backups. Complete email
 bodies are decoded only for local detection and immediately discarded; Paceboard
 stores the derived review fields, sender, subject, Gmail identifiers, and sync

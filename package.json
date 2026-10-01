@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.6",
+    "@upstash/redis": "^1.39.0",
     "dexie": "^4.0.11",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

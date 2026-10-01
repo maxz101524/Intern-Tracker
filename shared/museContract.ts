@@ -174,7 +174,7 @@ function entryPayload(value: unknown, path: string, issues: ContractIssue[]): Mu
         status: event.status,
         date: date(event.date, `${eventPath}.date`, issues),
       } as MuseHistoryEvent
-    })
+    }).filter((event): event is MuseHistoryEvent => event !== null)
   }
   return withoutUndefined(payload) as MuseEntryPayload
 }

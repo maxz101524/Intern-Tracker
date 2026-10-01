@@ -47,7 +47,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   const [drawerEntry, setDrawerEntry] = useState<ApplicationEntry | undefined>()
   const [toast, setToast] = useState<ToastState | null>(null)
   const [fatalError, setFatalError] = useState('')
-  const [reviewSource, setReviewSource] = useState<'gmail' | 'muse'>()
+  const [reviewSource, setReviewSource] = useState<'gmail' | 'muse'>('gmail')
   const scrollPositions = useRef<Record<Page, number>>({ overview: 0, applications: 0, review: 0, analytics: 0, settings: 0 })
   const commandId = useRef(0)
 
@@ -101,6 +101,10 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
 
   function navigate(next: Page) {
     scrollPositions.current[page] = window.scrollY
+    // Choose the review source on arrival so resolving the last item doesn't switch views underneath you.
+    if (next === 'review' && page !== 'review') {
+      setReviewSource(gmail.pendingCandidates.length === 0 && muse.pendingItems.length > 0 ? 'muse' : 'gmail')
+    }
     setPage(next)
     requestAnimationFrame(() => {
       document.documentElement.scrollTop = scrollPositions.current[next]
@@ -205,10 +209,9 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
       : 'Your last backup is over 14 days old.'
   const week = getWeekSummary(entries, settings.weeklyTarget, new Date(), settings.applicationDays)
   const reviewCount = gmail.pendingCandidates.length + muse.pendingItems.length
-  const activeReviewSource = reviewSource ?? (gmail.pendingCandidates.length === 0 && muse.pendingItems.length > 0 ? 'muse' : 'gmail')
   const reviewSwitcher = <div className="source-switch" role="group" aria-label="Review source">
-    <button type="button" aria-pressed={activeReviewSource === 'gmail'} onClick={() => setReviewSource('gmail')}><Mail size={15} /> Gmail <span>{gmail.pendingCandidates.length}</span></button>
-    <button type="button" aria-pressed={activeReviewSource === 'muse'} onClick={() => setReviewSource('muse')}><Bot size={15} /> Muse <span>{muse.pendingItems.length}</span></button>
+    <button type="button" aria-pressed={reviewSource === 'gmail'} onClick={() => setReviewSource('gmail')}><Mail size={15} /> Gmail <span>{gmail.pendingCandidates.length}</span></button>
+    <button type="button" aria-pressed={reviewSource === 'muse'} onClick={() => setReviewSource('muse')}><Bot size={15} /> Muse <span>{muse.pendingItems.length}</span></button>
   </div>
   const pageLabels: Record<Page, string> = { overview: 'Overview', applications: 'Applications', review: 'Review', analytics: 'Analytics', settings: 'Settings & data' }
 
@@ -233,7 +236,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
         {needsBackup && page !== 'settings' && <button type="button" className="backup-warning" onClick={() => void downloadBackupNow().catch(() => setToast({ message: 'Backup could not be downloaded. Try again from Settings & data.' }))}><AlertTriangle size={15} /><span>{backupWarning}</span><strong>Download backup <ChevronRight size={14} /></strong></button>}
         {page === 'overview' && <Overview entries={entries} settings={settings} onAdd={addApplication} onEdit={editApplication} onUpdateEntry={(next, previous, message) => updateEntries([next], [previous], message)} onOpenApplications={openApplications} />}
         <div hidden={page !== 'applications'}><Applications entries={entries} settings={settings} viewCommand={applicationViewCommand} onAdd={addApplication} onEdit={editApplication} onUpdateEntries={updateEntries} onSaveSettings={saveSettings} /></div>
-        {page === 'review' && (activeReviewSource === 'muse'
+        {page === 'review' && (reviewSource === 'muse'
           ? <MuseReview muse={muse} entries={entries} switcher={reviewSwitcher} />
           : <GmailReview candidates={gmail.pendingCandidates} dismissedCandidates={gmail.dismissedCandidates} entries={entries} onAccept={acceptGmailCandidate} onLink={gmail.linkCandidate} onAcceptStatus={acceptGmailStatus} onDismiss={gmail.dismissCandidate} onRestore={gmail.restoreCandidate} switcher={reviewSwitcher} />)}
         {page === 'analytics' && <Analytics entries={entries} onOpenApplications={openApplications} />}

@@ -1,4 +1,5 @@
 import { MUSE_LEDGER_SCHEMA, type MuseBatch, type MuseEntryPayload, type MuseLedger, type MuseStatusPayload } from '../../shared/museContract'
+import { STAGE_ACTIONS } from './attention'
 import { createApplication } from './entries'
 import { findPossibleDuplicate, matchGmailStatusToApplications } from './gmail'
 import { entryIdentity } from './restore'
@@ -166,8 +167,9 @@ export function planMuseIngest({ batches, entries, knownKeys, gmailCandidates, r
         continue
       }
 
-      write(applyMuseStatus(target, payload))
-      record({ ...item, state: 'applied', result: { entryId: target.id, action: 'status_added' } })
+      const applied = applyMuseStatus(target, payload)
+      write(applied.entry)
+      record({ ...item, state: 'applied', result: { entryId: target.id, action: 'status_added', ...(applied.nextActionSet ? { nextActionSet: true } : {}) } })
       resolveGmail(payload.origin?.messageId, target.id)
     }
   }
@@ -197,8 +199,24 @@ export function createMuseApplication(payload: MuseEntryPayload, updatedAt = new
   })
 }
 
-export function applyMuseStatus(entry: ApplicationEntry, payload: MuseStatusPayload): ApplicationEntry {
-  return appendStatus(entry, payload.status, payload.date, payload.origin, payload.id)
+/**
+ * Appends Muse's event. When Muse knows a deadline and the role has no open next action, the deadline
+ * becomes one so it shows up under Needs attention; an existing plan is never replaced.
+ */
+export function applyMuseStatus(entry: ApplicationEntry, payload: MuseStatusPayload): { entry: ApplicationEntry; nextActionSet: boolean } {
+  const updated = appendStatus(entry, payload.status, payload.date, payload.origin, payload.id)
+  const nextAction = museNextActionText(payload)
+  const hasOpenAction = Boolean(entry.nextAction?.trim()) && !entry.nextActionCompleted
+  if (updated === entry || !nextAction || !payload.dueDate || hasOpenAction) return { entry: updated, nextActionSet: false }
+  const next: ApplicationEntry = { ...updated, nextAction, nextActionDueDate: payload.dueDate, nextActionCompleted: false }
+  delete next.nextActionCompletedAt
+  return { entry: next, nextActionSet: true }
+}
+
+function museNextActionText(payload: MuseStatusPayload): string | undefined {
+  const action = STAGE_ACTIONS[payload.status]
+  if (!action) return undefined
+  return (payload.note ? `${action} — ${payload.note}` : action).slice(0, 200)
 }
 
 export function fillBlankFields(
@@ -232,7 +250,14 @@ export function undoMuseItem(item: MuseItem, entries: ApplicationEntry[]): { wri
 
   if (item.kind === 'status') {
     const statusHistory = entry.statusHistory.filter((event) => event.id !== item.payload.id)
-    return statusHistory.length === entry.statusHistory.length ? null : { write: { ...entry, statusHistory, updatedAt } }
+    if (statusHistory.length === entry.statusHistory.length) return null
+    const next: ApplicationEntry = { ...entry, statusHistory, updatedAt }
+    if (item.result.nextActionSet && entry.nextAction === museNextActionText(item.payload) && !entry.nextActionCompleted) {
+      delete next.nextAction
+      delete next.nextActionDueDate
+      delete next.nextActionCompleted
+    }
+    return { write: next }
   }
   if (item.result.action === 'created') return { deleteId: entry.id }
 

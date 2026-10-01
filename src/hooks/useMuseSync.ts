@@ -207,10 +207,10 @@ export function useMuseSync({
   const applyStatus = useCallback(async (item: MuseStatusItem, entryId: string) => {
     const reviewedAt = new Date().toISOString()
     const target = await findEntry(entryId)
-    const updated = applyMuseStatus(target, item.payload)
+    const { entry: updated, nextActionSet } = applyMuseStatus(target, item.payload)
     const changed = updated !== target
     await repository.reviewMuseItem({
-      item: { ...item, state: changed ? 'applied' : 'skipped', reviewedAt, result: { entryId: target.id, action: 'status_added' } },
+      item: { ...item, state: changed ? 'applied' : 'skipped', reviewedAt, result: { entryId: target.id, action: 'status_added', ...(nextActionSet ? { nextActionSet } : {}) } },
       entryWrites: changed ? [updated] : [],
     })
     await afterReview()

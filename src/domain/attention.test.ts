@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createApplication } from './entries'
-import { getAttentionGroups } from './attention'
+import { getAttentionGroups, getRecentResponses, getStageActions } from './attention'
+import { appendStatus } from './status'
 
 describe('next-action attention groups', () => {
   it('orders incomplete deadlines into overdue, today, and upcoming', () => {
@@ -31,5 +32,35 @@ describe('next-action attention groups', () => {
     expect(groups.overdue).toEqual([])
     expect(groups.today).toEqual([])
     expect(groups.upcoming).toEqual([])
+  })
+})
+
+describe('stage actions and recent responses', () => {
+  const role = (id: string, overrides: Parameters<typeof createApplication>[0] extends infer T ? Partial<T> : never = {}) =>
+    createApplication({ id, company: id, title: 'Intern', submittedDate: '2026-09-01', effort: 'quick', ...overrides })
+
+  it('turns active employer stages into actions until you schedule or finish them', () => {
+    const assessment = appendStatus(role('oa'), 'online_assessment', '2026-09-05')
+    const interview = appendStatus(appendStatus(role('int'), 'online_assessment', '2026-09-03'), 'interview', '2026-09-08')
+    const planned = { ...appendStatus(role('planned'), 'interview', '2026-09-04'), nextAction: 'Mock interview with Sam' }
+    const finished = { ...appendStatus(role('done'), 'online_assessment', '2026-09-04'), nextAction: 'Complete the online assessment', nextActionCompleted: true, nextActionCompletedAt: '2026-09-06T12:00:00.000Z' }
+    const earlierDone = { ...appendStatus(role('earlier'), 'interview', '2026-09-09'), nextAction: 'Send thank-you', nextActionCompleted: true, nextActionCompletedAt: '2026-09-02T12:00:00.000Z' }
+    const rejected = appendStatus(role('no'), 'rejected', '2026-09-04')
+
+    const actions = getStageActions([assessment, interview, planned, finished, earlierDone, rejected, role('applied')])
+
+    expect(actions.map(({ entry, action, since }) => [entry.id, action, since])).toEqual([
+      ['int', 'Prepare for the interview', '2026-09-08'],
+      ['earlier', 'Prepare for the interview', '2026-09-09'],
+      ['oa', 'Complete the online assessment', '2026-09-05'],
+    ])
+  })
+
+  it('lists recent employer responses newest first', () => {
+    const a = appendStatus(appendStatus(role('a'), 'online_assessment', '2026-09-03'), 'interview', '2026-09-09')
+    const b = appendStatus(role('b'), 'rejected', '2026-09-08')
+    const old = appendStatus(role('old', { submittedDate: '2026-07-20' }), 'rejected', '2026-08-01')
+    const responses = getRecentResponses([a, b, old], '2026-09-10', 14)
+    expect(responses.map(({ entry, event }) => `${entry.id}:${event.status}`)).toEqual(['a:interview', 'b:rejected', 'a:online_assessment'])
   })
 })

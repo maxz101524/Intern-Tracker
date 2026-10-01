@@ -133,6 +133,24 @@ describe('planMuseIngest — status updates', () => {
   })
 })
 
+describe('planMuseIngest — deadlines', () => {
+  it('turns a Muse deadline into a next action only when the role has no open plan', () => {
+    const open = entry({ id: 'muse-entry-1' })
+    const withDeadline = plan([incoming([], [statusPayload({ dueDate: '2026-10-08', note: 'HackerRank' })])], [open])
+    expect(withDeadline.items[0]).toMatchObject({ result: { nextActionSet: true } })
+    expect(withDeadline.entryWrites[0]).toMatchObject({ nextAction: 'Complete the online assessment — HackerRank', nextActionDueDate: '2026-10-08', nextActionCompleted: false })
+
+    const planned = entry({ id: 'muse-entry-1', nextAction: 'Ask Priya for a referral', nextActionDueDate: '2026-10-04' })
+    const kept = plan([incoming([], [statusPayload({ dueDate: '2026-10-08' })])], [planned])
+    expect(kept.entryWrites[0]).toMatchObject({ nextAction: 'Ask Priya for a referral', nextActionDueDate: '2026-10-04' })
+    expect(kept.items[0].result).not.toHaveProperty('nextActionSet')
+
+    const undo = undoMuseItem(withDeadline.items[0], withDeadline.entryWrites)
+    expect(undo?.write?.nextAction).toBeUndefined()
+    expect(undo?.write?.nextActionDueDate).toBeUndefined()
+  })
+})
+
 describe('planMuseIngest — Gmail overlap and idempotency', () => {
   it('resolves pending Gmail candidates that refer to the same message', () => {
     const target = entry({ id: 'muse-entry-1' })

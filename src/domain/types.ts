@@ -162,7 +162,7 @@ export interface MuseEntryItem extends MuseItemBase {
 export interface MuseStatusItem extends MuseItemBase {
   kind: 'status'
   payload: MuseStatusPayload
-  result?: { entryId: string; action: 'status_added' }
+  result?: { entryId: string; action: 'status_added'; nextActionSet?: boolean }
 }
 
 export type MuseItem = MuseEntryItem | MuseStatusItem

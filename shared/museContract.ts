@@ -85,6 +85,20 @@ export interface MuseLedger {
   entries: MuseLedgerEntry[]
 }
 
+export const STREAM_ID_PATTERN = /^\d+-\d+$/
+
+// Relay cursors are Redis stream IDs: "<milliseconds>-<sequence>".
+export function compareStreamIds(left: string, right: string): number {
+  const [leftMs, leftSeq] = left.split('-').map(Number)
+  const [rightMs, rightSeq] = right.split('-').map(Number)
+  return leftMs - rightMs || leftSeq - rightSeq
+}
+
+export function nextStreamId(id: string): string {
+  const [ms, seq] = id.split('-').map(Number)
+  return `${ms}-${seq + 1}`
+}
+
 export interface ContractIssue {
   path: string
   message: string

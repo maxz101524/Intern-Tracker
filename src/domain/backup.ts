@@ -7,7 +7,7 @@ import {
 } from './gmail'
 import { normalizeSettings } from './settings'
 import { getDisplayStatus, statusLabel, todayDate } from './status'
-import type { ApplicationEntry, ApplicationInput, AppSettings, GmailImportData, TrackerBackup } from './types'
+import type { ApplicationEntry, ApplicationInput, AppSettings, GmailImportData, MuseData, MuseItem, TrackerBackup } from './types'
 
 export function buildBackup(
   entries: ApplicationEntry[],
@@ -20,6 +20,7 @@ export function buildBackup(
   settings: AppSettings,
   gmail: GmailImportData,
   exportedAt?: string,
+  muse?: MuseData,
 ): TrackerBackup
 
 export function buildBackup(
@@ -27,12 +28,15 @@ export function buildBackup(
   settings: AppSettings,
   gmailOrExportedAt: GmailImportData | string = emptyGmailImportData(),
   maybeExportedAt?: string,
+  muse?: MuseData,
 ): TrackerBackup {
   const gmail = typeof gmailOrExportedAt === 'string' ? emptyGmailImportData() : gmailOrExportedAt
   const exportedAt = typeof gmailOrExportedAt === 'string'
     ? gmailOrExportedAt
     : maybeExportedAt ?? new Date().toISOString()
-  return { version: 4, exportedAt, entries, settings: normalizeSettings(settings), gmail }
+  const backup: TrackerBackup = { version: 4, exportedAt, entries, settings: normalizeSettings(settings), gmail }
+  if (muse) backup.muse = muse
+  return backup
 }
 
 export function parseBackup(raw: string): TrackerBackup {
@@ -54,13 +58,15 @@ export function parseBackup(raw: string): TrackerBackup {
       if (!isRecord(candidate)) throw new Error()
       return createApplication(candidate as unknown as ApplicationInput)
     })
-    return {
+    const backup: TrackerBackup = {
       version: 4,
       exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : new Date().toISOString(),
       entries,
       settings: normalizeSettings(data.settings),
       gmail: data.version === 2 ? emptyGmailImportData() : validGmailImportData(data.gmail),
     }
+    if (data.muse !== undefined) backup.muse = validMuseData(data.muse)
+    return backup
   } catch {
     throw new Error('This file is not a valid Paceboard backup.')
   }
@@ -113,6 +119,23 @@ function validSettings(value: unknown): value is AppSettings {
   return Number.isInteger(value.weeklyTarget) && Number(value.weeklyTarget) >= 0 &&
     Array.isArray(value.sources) && value.sources.every((source) => typeof source === 'string') &&
     (value.lastBackupAt === null || value.lastBackupAt === undefined || typeof value.lastBackupAt === 'string')
+}
+
+function validMuseData(value: unknown): MuseData {
+  if (!isRecord(value) || !Array.isArray(value.items) || !isRecord(value.syncState) || value.syncState.key !== 'muse') {
+    throw new Error()
+  }
+  const items = value.items.map((item) => {
+    if (!isRecord(item) || typeof item.key !== 'string' || !['entry', 'status'].includes(String(item.kind)) ||
+      !['applied', 'pending', 'dismissed', 'skipped'].includes(String(item.state)) || !isRecord(item.payload) ||
+      typeof item.batchId !== 'string' || typeof item.streamId !== 'string' || typeof item.receivedAt !== 'string') {
+      throw new Error()
+    }
+    return item as unknown as MuseItem
+  })
+  const syncState = Object.fromEntries(Object.entries(value.syncState).filter(([key, field]) =>
+    key === 'key' || key === 'retentionGap' ? true : typeof field === 'string'))
+  return { items, syncState: syncState as unknown as MuseData['syncState'] }
 }
 
 function validGmailImportData(value: unknown): GmailImportData {

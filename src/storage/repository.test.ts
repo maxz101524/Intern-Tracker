@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApplication } from '../domain/entries'
 import { createGmailCandidate, emptyGmailImportData } from '../domain/gmail'
 import { buildBackup } from '../domain/backup'
+import type { MuseItem } from '../domain/types'
 import { TrackerRepository } from './repository'
 
 describe('TrackerRepository v2', () => {
@@ -197,6 +198,100 @@ describe('TrackerRepository v2', () => {
     expect(before.changeCount).toBe(2)
     const after = await repository.markBackup('2026-09-10T18:00:00.000Z')
     expect(after.lastBackupChangeCount).toBe(after.changeCount)
+  })
+})
+
+describe('TrackerRepository Muse sync', () => {
+  let name: string
+  let repository: TrackerRepository
+
+  beforeEach(() => {
+    name = `paceboard-muse-${crypto.randomUUID()}`
+    repository = new TrackerRepository(name)
+  })
+
+  afterEach(async () => {
+    await repository.destroy()
+  })
+
+  function museItem(overrides: Partial<MuseItem> = {}): MuseItem {
+    return {
+      key: 'entry:m-1', kind: 'entry', batchId: 'run-1', streamId: '1000-0', state: 'applied', receivedAt: '2026-10-02T12:00:00.000Z',
+      payload: { id: 'm-1', company: 'Acme', title: 'ML Intern', submittedDate: '2026-10-01', effort: 'quick' },
+      result: { entryId: 'm-1', action: 'created' },
+      ...overrides,
+    } as MuseItem
+  }
+
+  it('upgrades v4 browser data to v5 without changing applications or Gmail data', async () => {
+    const existing = createApplication({ company: 'Acme', title: 'ML Intern', submittedDate: '2026-09-09', effort: 'quick' })
+    await repository.destroy()
+    const old = new Dexie(name)
+    old.version(4).stores({
+      entries: 'id, submittedDate, effort, source, company, updatedAt, origin.messageId',
+      settings: 'key',
+      gmailCandidates: 'messageId, state, kind, submittedDate, createdAt',
+      processedGmailMessages: 'messageId, disposition, processedAt',
+      gmailSync: 'key',
+    })
+    await old.table('entries').put(existing)
+    await old.table('gmailCandidates').put(sampleCandidate())
+    old.close()
+
+    repository = new TrackerRepository(name)
+    expect(await repository.listEntries()).toEqual([existing])
+    expect(await repository.listGmailCandidates()).toHaveLength(1)
+    expect(await repository.getMuseData()).toEqual({ items: [], syncState: { key: 'muse' } })
+  })
+
+  it('commits Muse items, entries, Gmail resolutions, and the cursor together', async () => {
+    const candidate = sampleCandidate()
+    await repository.saveGmailCandidate(candidate)
+    const application = createApplication({ id: 'm-1', company: 'Acme', title: 'ML Intern', submittedDate: '2026-10-01', effort: 'quick' })
+    const resolved = { ...candidate, state: 'imported' as const, linkedEntryId: 'm-1', reviewedAt: '2026-10-02T12:00:00.000Z' }
+
+    await repository.commitMuseIngest({
+      items: [museItem()], entryWrites: [application], gmailResolutions: [resolved],
+      syncState: { key: 'muse', cursor: '1000-0', lastPulledAt: '2026-10-02T12:00:00.000Z' },
+    })
+
+    expect(await repository.listEntries()).toEqual([application])
+    expect(await repository.getMuseData()).toEqual({ items: [museItem()], syncState: { key: 'muse', cursor: '1000-0', lastPulledAt: '2026-10-02T12:00:00.000Z' } })
+    expect(await repository.getGmailCandidate(candidate.messageId)).toMatchObject({ state: 'imported', linkedEntryId: 'm-1' })
+    expect(await repository.hasProcessedGmailMessage(candidate.messageId)).toBe(true)
+  })
+
+  it('leaves the cursor unchanged when an ingest commit fails', async () => {
+    await repository.saveMuseSyncState({ key: 'muse', cursor: '900-0' })
+    const invalid = { ...museItem(), key: undefined } as unknown as MuseItem
+    await expect(repository.commitMuseIngest({
+      items: [invalid], entryWrites: [], gmailResolutions: [], syncState: { key: 'muse', cursor: '1000-0' },
+    })).rejects.toThrow()
+    expect((await repository.getMuseData()).syncState.cursor).toBe('900-0')
+  })
+
+  it('applies a reviewed Muse item with its entry writes and deletions', async () => {
+    const application = createApplication({ id: 'm-1', company: 'Acme', title: 'ML Intern', submittedDate: '2026-10-01', effort: 'quick' })
+    await repository.saveEntry(application)
+    await repository.reviewMuseItem({ item: museItem({ state: 'dismissed', reason: 'undone' }), deleteEntryIds: ['m-1'] })
+    expect(await repository.listEntries()).toEqual([])
+    expect((await repository.getMuseData()).items[0]).toMatchObject({ state: 'dismissed', reason: 'undone' })
+  })
+
+  it('restores Muse data from backups and merges by item key', async () => {
+    const settings = { weeklyTarget: 35, sources: ['Company site'], lastBackupAt: null }
+    const muse = { items: [museItem()], syncState: { key: 'muse' as const, cursor: '1000-0' } }
+    await repository.restoreFromJson(JSON.stringify(buildBackup([], settings, emptyGmailImportData(), undefined, muse)))
+    expect(await repository.getMuseData()).toEqual(muse)
+
+    const newer = { items: [museItem({ key: 'status:e-1', kind: 'status', streamId: '2000-0', payload: { id: 'e-1', entryId: 'm-1', status: 'rejected', date: '2026-10-05', confidence: 'high' } } as Partial<MuseItem>)], syncState: { key: 'muse' as const, cursor: '2000-0' } }
+    await repository.restoreFromJson(JSON.stringify(buildBackup([], settings, emptyGmailImportData(), undefined, newer)), 'merge')
+    const merged = await repository.getMuseData()
+    expect(merged.items.map((item) => item.key)).toEqual(['entry:m-1', 'status:e-1'])
+    expect(merged.syncState.cursor).toBe('2000-0')
+
+    await repository.restoreFromJson(JSON.stringify(buildBackup([], settings, emptyGmailImportData())))
+    expect(await repository.getMuseData()).toEqual({ items: [], syncState: { key: 'muse' } })
   })
 })
 

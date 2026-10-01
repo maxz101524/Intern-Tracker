@@ -1,4 +1,6 @@
-import type { MuseBatch, MuseLedger } from '../../shared/museContract.js'
+import { compareStreamIds, type MuseBatch, type MuseLedger } from '../../shared/museContract.js'
+
+export { compareStreamIds, nextStreamId, STREAM_ID_PATTERN } from '../../shared/museContract.js'
 
 export interface StoredBatch {
   id: string
@@ -11,19 +13,6 @@ export interface RelayStore {
   readBatches(after: string | null, limit: number): Promise<{ batches: StoredBatch[]; hasMore: boolean; oldestId: string | null }>
   getLedger(): Promise<MuseLedger | null>
   putLedger(ledger: MuseLedger): Promise<void>
-}
-
-export const STREAM_ID_PATTERN = /^\d+-\d+$/
-
-export function compareStreamIds(left: string, right: string): number {
-  const [leftMs, leftSeq] = left.split('-').map(Number)
-  const [rightMs, rightSeq] = right.split('-').map(Number)
-  return leftMs - rightMs || leftSeq - rightSeq
-}
-
-export function nextStreamId(id: string): string {
-  const [ms, seq] = id.split('-').map(Number)
-  return `${ms}-${seq + 1}`
 }
 
 export function createMemoryStore(): RelayStore {

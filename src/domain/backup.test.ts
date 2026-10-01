@@ -3,7 +3,7 @@ import { buildBackup, entriesToCsv, parseBackup } from './backup'
 import { createApplication } from './entries'
 import { appendStatus } from './status'
 import { emptyGmailImportData } from './gmail'
-import type { AppSettings, GmailCandidate, GmailImportData, ProcessedGmailMessage } from './types'
+import type { AppSettings, GmailCandidate, GmailImportData, MuseData, ProcessedGmailMessage } from './types'
 
 const settings: AppSettings = {
   weeklyTarget: 35,
@@ -79,6 +79,23 @@ describe('backup and export v4', () => {
     const invalidGmail = buildBackup([], settings, emptyGmailImportData()) as unknown as Record<string, unknown>
     invalidGmail.gmail = { candidates: [{ messageId: '' }], processedMessages: [], syncState: { key: 'gmail' } }
     expect(() => parseBackup(JSON.stringify(invalidGmail))).toThrow('This file is not a valid Paceboard backup.')
+  })
+
+  it('round-trips Muse items and sync state and accepts backups without them', () => {
+    const muse: MuseData = {
+      items: [{
+        key: 'entry:m-1', kind: 'entry', batchId: 'run-1', streamId: '1000-0', state: 'applied', receivedAt: '2026-10-02T12:00:00.000Z',
+        payload: { id: 'm-1', company: 'Acme', title: 'ML Intern', submittedDate: '2026-10-01', effort: 'quick' },
+        result: { entryId: 'm-1', action: 'created' },
+      }],
+      syncState: { key: 'muse', cursor: '1000-0', lastPulledAt: '2026-10-02T12:00:00.000Z', retentionGap: false },
+    }
+    const backup = buildBackup([], settings, emptyGmailImportData(), '2026-10-02T13:00:00.000Z', muse)
+    expect(parseBackup(JSON.stringify(backup)).muse).toEqual(muse)
+    expect(parseBackup(JSON.stringify(buildBackup([], settings, emptyGmailImportData()))).muse).toBeUndefined()
+
+    const broken = { ...backup, muse: { items: [{ key: 'x' }], syncState: { key: 'muse' } } }
+    expect(() => parseBackup(JSON.stringify(broken))).toThrow('This file is not a valid Paceboard backup.')
   })
 
   it('exports one escaped row per application with current status and history', () => {

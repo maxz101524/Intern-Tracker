@@ -17,4 +17,19 @@ describe('next-action attention groups', () => {
     expect(groups.today.map(({ id }) => id)).toEqual(['today'])
     expect(groups.upcoming.map(({ id }) => id)).toEqual(['sooner', 'later'])
   })
+
+  it('keeps actions without a due date visible and excludes blank or completed actions', () => {
+    const make = (id: string, company: string, nextAction: string, nextActionCompleted = false) => createApplication({
+      id, company, title: 'Intern', submittedDate: '2026-09-01', effort: 'quick', nextAction, nextActionCompleted,
+    })
+    const groups = getAttentionGroups([
+      make('z', 'Zoom', 'Prepare interview'), make('a', 'Acme', 'Write follow-up'),
+      make('empty', 'Blank', '   '), make('done', 'Done', 'Send note', true),
+    ], '2026-09-10')
+
+    expect(groups.noDate.map(({ id }) => id)).toEqual(['a', 'z'])
+    expect(groups.overdue).toEqual([])
+    expect(groups.today).toEqual([])
+    expect(groups.upcoming).toEqual([])
+  })
 })

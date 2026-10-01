@@ -11,12 +11,16 @@ record per role without turning the job search into a data-entry project.
 - Keeps a correctable status history for assessments, screens, interviews, offers,
   rejections, and withdrawals, with Gmail message IDs used for idempotency.
 - Tracks optional next actions and deadlines, surfaced by urgency on Overview.
+- Keeps undated actions visible alongside upcoming deadlines, with quick completion
+  and snooze controls.
 - Automatically displays Applied roles as No response after 21 calendar days while
   leaving the stored status available for future updates.
 - Shows weekly pace, daily activity, pipeline distribution, response rates, and
   Quick-versus-Targeted performance.
 - Provides a searchable, sortable Applications ledger with direct status edits,
   bulk updates, undo, presets, saved views, and configurable columns.
+- Opens any application from workspace search, with keyboard navigation and focus
+  restored after closing an edit sheet.
 - Connects directly to Gmail in the browser and detects application confirmations,
   assessment invitations, interview invitations, and rejection messages.
 - Places detected messages in a review queue with explicit matching, duplicate
@@ -44,6 +48,24 @@ npm run build
 
 The app works without Gmail configuration; manual tracking, analytics, and backup
 remain available.
+
+## Mac workspace shortcuts
+
+The layout is designed for Mac desktop browsers and adapts to resized windows and
+Split View. There is no separate phone interface.
+
+| Shortcut | Action |
+| --- | --- |
+| `⌘K` | Find an application or workspace action from any page |
+| `N` | Add an application when not editing a field |
+| `/` | Focus ledger search on Applications; open workspace search elsewhere |
+| `↑` / `↓`, then `Enter` | Open a workspace search result |
+| `⌘Enter` | Validate and save the open application |
+| `Escape` | Close search or the application drawer and return focus |
+
+Active filters can be removed individually. Changing the view clears selection;
+bulk changes affect only the roles shown. Failed updates stay available to retry,
+and application drafts remain on the current device until saved or discarded.
 
 ## Configure Gmail import
 

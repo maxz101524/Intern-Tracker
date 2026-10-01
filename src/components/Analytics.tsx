@@ -50,7 +50,7 @@ export function Analytics({ entries, onOpenApplications }: {
       </section>
 
       <div className="analytics-grid">
-        <section className="panel weekly-panel"><div className="section-heading"><div><h2>Eight-week volume</h2><p>Only submissions inside the selected range.</p></div></div><div className="weekly-chart" role="img" aria-label="Application volume for the last eight weeks">{weekly.map((week) => <div key={week.label}><span>{week.total || ''}</span><i style={{ height: `${Math.max(3, week.total / maxWeek * 100)}%` }} /><b>{week.label}</b></div>)}</div></section>
+        <section className="panel weekly-panel"><div className="section-heading"><div><h2>Eight-week volume</h2><p>Only submissions inside the selected range.</p></div></div><div className="weekly-chart" role="img" aria-label="Application volume for the last eight weeks">{weekly.map((week) => <div key={week.label}><span>{week.total || ''}</span><i style={{ height: `${week.total / maxWeek * 100}%` }} /><b>{week.label}</b></div>)}</div></section>
         <section className="panel distribution-panel"><div className="section-heading"><div><h2>Pipeline distribution</h2><p>Select a row to open that filtered ledger.</p></div></div><div className="distribution-list">{pipelineOrder.map((status) => <button type="button" key={status} onClick={() => onOpenApplications({ ...rangeFilters, status })}><span>{statusLabel(status)}</span><i><b className={`status-${status}`} style={{ width: `${pipeline[status] / maxPipeline * 100}%` }} /></i><strong>{pipeline[status]}</strong></button>)}</div></section>
       </div>
 

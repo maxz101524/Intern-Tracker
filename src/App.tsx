@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, BarChart3, BriefcaseBusiness, Inbox, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react'
+import { AlertTriangle, BarChart3, BriefcaseBusiness, ChevronRight, CircleCheck, Inbox, LayoutDashboard, Plus, Search, Settings as SettingsIcon } from 'lucide-react'
 import { Analytics } from './components/Analytics'
 import { ApplicationDrawer } from './components/ApplicationDrawer'
 import { Applications, type ApplicationViewCommand } from './components/Applications'
@@ -7,6 +7,8 @@ import { GmailReview } from './components/GmailReview'
 import { Onboarding } from './components/Onboarding'
 import { Overview } from './components/Overview'
 import { Settings } from './components/Settings'
+import { CommandMenu } from './components/CommandMenu'
+import { getWeekSummary } from './domain/analytics'
 import { buildBackup } from './domain/backup'
 import type { RestoreChoices } from './domain/restore'
 import { DEFAULT_RESUME_VARIANTS } from './domain/settings'
@@ -34,6 +36,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   const [page, setPage] = useState<Page>('overview')
   const [applicationViewCommand, setApplicationViewCommand] = useState<ApplicationViewCommand>()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [drawerEntry, setDrawerEntry] = useState<ApplicationEntry | undefined>()
   const [toast, setToast] = useState<ToastState | null>(null)
   const [fatalError, setFatalError] = useState('')
@@ -68,12 +71,17 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
-      if (drawerOpen || event.metaKey || event.ctrlKey || event.altKey || target?.matches('input, textarea, select, [contenteditable="true"]')) return
+      if (drawerOpen || event.isComposing) return
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault(); setSearchOpen((current) => !current); return
+      }
+      if (searchOpen || event.metaKey || event.ctrlKey || event.altKey || target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (event.key === '/' && page !== 'applications') { event.preventDefault(); setSearchOpen(true); return }
       if (event.key.toLowerCase() === 'n') { event.preventDefault(); addApplication() }
     }
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
-  }, [drawerOpen])
+  }, [drawerOpen, searchOpen, page])
 
   function navigate(next: Page) {
     scrollPositions.current[page] = window.scrollY
@@ -179,11 +187,14 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
     : changesSinceBackup > 0
       ? `${changesSinceBackup} ${changesSinceBackup === 1 ? 'change' : 'changes'} since your last backup.`
       : 'Your last backup is over 14 days old.'
+  const week = getWeekSummary(entries, settings.weeklyTarget, new Date(), settings.applicationDays)
+  const pageLabels: Record<Page, string> = { overview: 'Overview', applications: 'Applications', review: 'Review', analytics: 'Analytics', settings: 'Settings & data' }
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workspace-content">Skip to content</a>
       <aside className="sidebar">
-        <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">P</span><span>Paceboard</span></div>
+        <div className="brand-lockup"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M7 20V8h7a5 5 0 0 1 0 10H7M11 20v-8h3a1 1 0 0 1 0 2h-3" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span>Paceboard<span className="brand-caption">Your job search workspace</span></span></div>
         <nav aria-label="Primary navigation">
           <NavButton label="Overview" active={page === 'overview'} icon={<LayoutDashboard size={19} />} onClick={() => navigate('overview')} />
           <NavButton label="Applications" active={page === 'applications'} icon={<BriefcaseBusiness size={19} />} onClick={() => navigate('applications')} />
@@ -191,11 +202,13 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
           <NavButton label="Analytics" active={page === 'analytics'} icon={<BarChart3 size={19} />} onClick={() => navigate('analytics')} />
           <NavButton label="Settings & data" active={page === 'settings'} icon={<SettingsIcon size={19} />} onClick={() => navigate('settings')} />
         </nav>
-        <div className="sidebar-meta"><span>Local workspace</span><small>Saved in this browser</small></div>
+        <button type="button" className="sidebar-pace" onClick={() => navigate('overview')} aria-label="Open weekly pace"><span>This week <strong>{week.submitted}<small> / {settings.weeklyTarget}</small></strong></span><span className="sidebar-progress"><i style={{ width: `${Math.min(100, week.submitted / settings.weeklyTarget * 100)}%` }} /></span><small>{week.remaining ? `${week.remaining} applications to your goal` : 'Weekly goal reached'}</small></button>
+        <div className="sidebar-meta"><CircleCheck size={16} /><div><span>Local workspace</span><small>Saved in this browser</small></div></div>
       </aside>
 
-      <main className="main-area">
-        {needsBackup && page !== 'settings' && <button type="button" className="backup-warning" onClick={() => void downloadBackupNow()}><AlertTriangle size={16} /><span>{backupWarning}</span><strong>Download backup</strong></button>}
+      <main className="main-area" id="workspace-content" tabIndex={-1}>
+        <div className="workspace-bar"><div className="workspace-breadcrumb"><span>My workspace</span><ChevronRight size={14} /><strong>{pageLabels[page]}</strong></div><button type="button" className="workspace-search" onClick={() => setSearchOpen(true)} aria-label="Search workspace"><Search size={16} /><span>Find anything</span><kbd>⌘ K</kbd></button><time className="workspace-date" dateTime={new Date().toLocaleDateString('en-CA')}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' })}</time></div>
+        {needsBackup && page !== 'settings' && <button type="button" className="backup-warning" onClick={() => void downloadBackupNow().catch(() => setToast({ message: 'Backup could not be downloaded. Try again from Settings & data.' }))}><AlertTriangle size={15} /><span>{backupWarning}</span><strong>Download backup <ChevronRight size={14} /></strong></button>}
         {page === 'overview' && <Overview entries={entries} settings={settings} onAdd={addApplication} onEdit={editApplication} onUpdateEntry={(next, previous, message) => updateEntries([next], [previous], message)} onOpenApplications={openApplications} />}
         <div hidden={page !== 'applications'}><Applications entries={entries} settings={settings} viewCommand={applicationViewCommand} onAdd={addApplication} onEdit={editApplication} onUpdateEntries={updateEntries} onSaveSettings={saveSettings} /></div>
         {page === 'review' && <GmailReview candidates={gmail.pendingCandidates} dismissedCandidates={gmail.dismissedCandidates} entries={entries} onAccept={acceptGmailCandidate} onLink={gmail.linkCandidate} onAcceptStatus={acceptGmailStatus} onDismiss={gmail.dismissCandidate} onRestore={gmail.restoreCandidate} />}
@@ -203,6 +216,13 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
         {page === 'settings' && <Settings entries={entries} settings={settings} gmail={gmail} onSave={saveSettings} onMarkBackup={markBackup} onRestore={restore} />}
       </main>
 
+      {searchOpen && <CommandMenu entries={entries} actions={[
+        { id: 'add', label: 'Add application', detail: 'Log a new role', icon: <Plus size={19} />, run: addApplication },
+        { id: 'applications', label: 'Applications', detail: 'Search and manage your roles', icon: <BriefcaseBusiness size={19} />, run: () => openApplications({}) },
+        { id: 'review', label: 'Review Gmail matches', detail: `${gmail.pendingCandidates.length} pending matches`, icon: <Inbox size={19} />, run: () => navigate('review') },
+        { id: 'analytics', label: 'Analytics', detail: 'Explore your application patterns', icon: <BarChart3 size={19} />, run: () => navigate('analytics') },
+        { id: 'settings', label: 'Settings & data', detail: 'Preferences, Gmail, and backups', icon: <SettingsIcon size={19} />, run: () => navigate('settings') },
+      ]} onEdit={editApplication} onSearchApplications={(query) => openApplications({ query })} onClose={() => setSearchOpen(false)} />}
       {drawerOpen && <ApplicationDrawer key={drawerEntry?.id ?? 'new'} entry={drawerEntry} entries={entries} sources={settings.sources} resumeVariants={settings.resumeVariants ?? DEFAULT_RESUME_VARIANTS} onClose={closeDrawer} onSave={saveEntry} onDelete={deleteEntry} onOpenExisting={editApplication} />}
       {toast && <div className="toast" role="status"><span>{toast.message}</span>{toast.undoEntries && <button type="button" onClick={undoChange}>Undo</button>}<button type="button" className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss notification">×</button></div>}
     </div>
@@ -211,5 +231,5 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
 
 function NavButton({ label, count, active, icon, onClick }: { label: string; count?: number; active: boolean; icon: React.ReactNode; onClick: () => void }) {
   const accessibleLabel = count === undefined ? label : `${label}, ${count} pending`
-  return <button type="button" className={active ? 'active' : ''} onClick={onClick} aria-label={accessibleLabel}>{icon}<span>{label}</span>{count !== undefined && <span className="nav-count" aria-hidden="true">{count}</span>}</button>
+  return <button type="button" className={active ? 'active' : ''} onClick={onClick} aria-current={active ? 'page' : undefined} aria-label={accessibleLabel}>{icon}<span className="nav-label">{label}</span>{count !== undefined && count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}</button>
 }

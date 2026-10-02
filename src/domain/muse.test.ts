@@ -151,6 +151,26 @@ describe('planMuseIngest — deadlines', () => {
   })
 })
 
+describe('planMuseIngest — repeated rounds', () => {
+  it('records a same-stage update only when Muse marks it a new round', () => {
+    const firstRound = appendStatus(entry({ id: 'muse-entry-1', nextAction: 'Complete the online assessment — Round 1', nextActionDueDate: '2026-09-25' }), 'online_assessment', '2026-09-22', undefined, 'round-1')
+
+    const repeat = plan([incoming([], [statusPayload({ date: '2026-10-01' })])], [firstRound])
+    expect(repeat.items[0].state).toBe('skipped')
+
+    const secondRound = plan([incoming([], [statusPayload({ date: '2026-10-01', newRound: true, note: 'Round 2', dueDate: '2026-10-06' })])], [firstRound])
+    expect(secondRound.items[0]).toMatchObject({ state: 'applied', result: { nextActionSet: true } })
+    expect(secondRound.entryWrites[0].statusHistory.map(({ status, date }) => `${status}@${date}`)).toEqual([
+      'applied@2026-09-20', 'online_assessment@2026-09-22', 'online_assessment@2026-10-01',
+    ])
+    expect(secondRound.entryWrites[0]).toMatchObject({ nextAction: 'Complete the online assessment — Round 2', nextActionDueDate: '2026-10-06' })
+
+    const ownPlan = { ...firstRound, nextAction: 'Ask Priya about the format' }
+    const kept = plan([incoming([], [statusPayload({ date: '2026-10-01', newRound: true, dueDate: '2026-10-06' })])], [ownPlan])
+    expect(kept.entryWrites[0].nextAction).toBe('Ask Priya about the format')
+  })
+})
+
 describe('planMuseIngest — Gmail overlap and idempotency', () => {
   it('resolves pending Gmail candidates that refer to the same message', () => {
     const target = entry({ id: 'muse-entry-1' })

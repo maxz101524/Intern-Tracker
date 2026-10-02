@@ -58,6 +58,7 @@ describe('validateMuseBatch', () => {
     expect(issuesOf(batch({ statusUpdates: [{ ...batch().statusUpdates[0], status: 'applied' }] }))).toContain('statusUpdates[0].status')
     expect(issuesOf(batch({ statusUpdates: [{ ...batch().statusUpdates[0], entryId: undefined }] }))).toContain('statusUpdates[0].entryId')
     expect(issuesOf(batch({ statusUpdates: [{ ...batch().statusUpdates[0], confidence: 'medium' }] }))).toContain('statusUpdates[0].confidence')
+    expect(issuesOf(batch({ statusUpdates: [{ ...batch().statusUpdates[0], newRound: 'yes' }] }))).toContain('statusUpdates[0].newRound')
   })
 
   it('rejects batches with too many items', () => {

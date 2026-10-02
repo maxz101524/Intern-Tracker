@@ -55,6 +55,7 @@ export interface MuseStatusPayload {
   confidence: 'high' | 'low'
   note?: string
   dueDate?: string
+  newRound?: boolean
 }
 
 export interface MuseBatch {
@@ -229,6 +230,10 @@ function statusPayload(value: unknown, path: string, issues: ContractIssue[]): M
   if (value.origin !== undefined && value.origin !== null) payload.origin = origin(value.origin, `${path}.origin`, issues)
   if (value.note !== undefined && value.note !== null) payload.note = text(value.note, `${path}.note`, issues, { max: MAX_NOTES })
   if (value.dueDate !== undefined && value.dueDate !== null) payload.dueDate = date(value.dueDate, `${path}.dueDate`, issues)
+  if (value.newRound !== undefined && value.newRound !== null) {
+    if (typeof value.newRound !== 'boolean') issues.push({ path: `${path}.newRound`, message: 'Expected true or false.' })
+    else if (value.newRound) payload.newRound = true
+  }
   return withoutUndefined(payload) as MuseStatusPayload
 }
 

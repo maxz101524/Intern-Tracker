@@ -158,7 +158,7 @@ export function planMuseIngest({ batches, entries, knownKeys, gmailCandidates, r
         continue
       }
       const currentStatus = getCurrentStatus(target)
-      if (currentStatus === payload.status) {
+      if (currentStatus === payload.status && !payload.newRound) {
         record({ ...item, state: 'skipped', result: { entryId: target.id, action: 'status_added' } })
         continue
       }
@@ -200,13 +200,15 @@ export function createMuseApplication(payload: MuseEntryPayload, updatedAt = new
 }
 
 /**
- * Appends Muse's event. When Muse knows a deadline and the role has no open next action, the deadline
- * becomes one so it shows up under Needs attention; an existing plan is never replaced.
+ * Appends Muse's event (a same-stage event only when Muse marks it a new round). When Muse knows a
+ * deadline, it becomes the next action unless you have your own open plan; an open stage reminder
+ * from an earlier round is replaced, a plan you wrote never is.
  */
 export function applyMuseStatus(entry: ApplicationEntry, payload: MuseStatusPayload): { entry: ApplicationEntry; nextActionSet: boolean } {
-  const updated = appendStatus(entry, payload.status, payload.date, payload.origin, payload.id)
+  const updated = appendStatus(entry, payload.status, payload.date, payload.origin, payload.id, payload.newRound === true)
   const nextAction = museNextActionText(payload)
-  const hasOpenAction = Boolean(entry.nextAction?.trim()) && !entry.nextActionCompleted
+  const stageReminder = Object.values(STAGE_ACTIONS).some((label) => entry.nextAction?.startsWith(label))
+  const hasOpenAction = Boolean(entry.nextAction?.trim()) && !entry.nextActionCompleted && !stageReminder
   if (updated === entry || !nextAction || !payload.dueDate || hasOpenAction) return { entry: updated, nextActionSet: false }
   const next: ApplicationEntry = { ...updated, nextAction, nextActionDueDate: payload.dueDate, nextActionCompleted: false }
   delete next.nextActionCompletedAt

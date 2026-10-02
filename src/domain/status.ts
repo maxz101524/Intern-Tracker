@@ -58,6 +58,7 @@ export function appendStatus(
   date: string,
   origin?: ApplicationOrigin,
   id: string = crypto.randomUUID(),
+  allowRepeat = false,
 ): ApplicationEntry {
   if (!isApplicationStatus(status)) throw new Error('Application status is not valid.')
   if (!isValidDateOnly(date)) throw new Error('Status date is not valid.')
@@ -67,7 +68,8 @@ export function appendStatus(
   if (origin && entry.statusHistory.some((event) => event.origin?.provider === origin.provider && event.origin.messageId === origin.messageId)) {
     return entry
   }
-  if (getCurrentStatus(entry) === status) return entry
+  // A repeat is normally a duplicate report; callers opt in when it is a genuine new round.
+  if (getCurrentStatus(entry) === status && !allowRepeat) return entry
 
   const nextEvent: StatusEvent = origin ? { id, status, date, origin } : { id, status, date }
   const statusHistory = [...entry.statusHistory, nextEvent]

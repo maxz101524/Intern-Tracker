@@ -76,7 +76,7 @@ export function entriesToCsv(entries: ApplicationEntry[], today = todayDate()): 
   const columns = [
     'id', 'company', 'title', 'submittedDate', 'effort', 'source', 'currentStatus',
     'statusHistory', 'originProvider', 'originMessageId', 'url', 'resumeVariant', 'nextAction',
-    'nextActionDueDate', 'nextActionCompleted', 'jobDescriptionExcerpt', 'notes', 'updatedAt',
+    'nextActionDueDate', 'nextActionCompleted', 'jobDescriptionExcerpt', 'notes', 'postedDate', 'updatedAt',
   ]
   const rows = entries.map((entry) => {
     const values: unknown[] = [
@@ -97,6 +97,7 @@ export function entriesToCsv(entries: ApplicationEntry[], today = todayDate()): 
       entry.nextActionCompleted,
       entry.jobDescriptionExcerpt,
       entry.notes,
+      entry.postedDate,
       entry.updatedAt,
     ]
     return values.map(csvCell).join(',')
@@ -135,7 +136,13 @@ function validMuseData(value: unknown): MuseData {
   })
   const syncState = Object.fromEntries(Object.entries(value.syncState).filter(([key, field]) =>
     key === 'key' || key === 'retentionGap' ? true : typeof field === 'string'))
-  return { items, syncState: syncState as unknown as MuseData['syncState'] }
+  if (value.decisions !== undefined && (!Array.isArray(value.decisions) || value.decisions.some((decision) =>
+    !isRecord(decision) || typeof decision.id !== 'string' || !['open', 'answered', 'closed'].includes(String(decision.state)) || !isRecord(decision.payload)))) {
+    throw new Error()
+  }
+  const muse: MuseData = { items, syncState: syncState as unknown as MuseData['syncState'] }
+  if (value.decisions !== undefined) muse.decisions = value.decisions as MuseData['decisions']
+  return muse
 }
 
 function validGmailImportData(value: unknown): GmailImportData {

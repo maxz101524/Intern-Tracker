@@ -47,7 +47,7 @@ export function MuseSettings({ muse }: { muse: MuseSyncController }) {
             </div>
           </div>
           <div className="gmail-sync-summary">
-            <span><strong>{muse.pendingItems.length}</strong> waiting for review</span>
+            <span><strong>{muse.pendingItems.length + muse.openDecisions.length}</strong> waiting for you</span>
             <span><strong>Last pull</strong> {lastPulledAt ? new Date(lastPulledAt).toLocaleString() : 'Never'}</span>
             <span><strong>Ledger shared</strong> {lastLedgerPublishedAt ? new Date(lastLedgerPublishedAt).toLocaleString() : 'Not yet'}</span>
           </div>

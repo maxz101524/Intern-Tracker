@@ -1,4 +1,4 @@
-import { planMuseIngest, type MuseIngestSummary } from '../domain/muse'
+import { planMuseDecisions, planMuseIngest, type MuseIngestSummary } from '../domain/muse'
 import type { TrackerRepository } from '../storage/repository'
 import type { MuseRelayClient } from './client'
 
@@ -7,6 +7,7 @@ const RETENTION_WARNING_MS = 85 * 86_400_000
 
 export interface MusePullOutcome {
   summary: MuseIngestSummary
+  newDecisions: number
   batches: number
   retentionGap: boolean
   pulledAt: string
@@ -36,6 +37,7 @@ export async function pullMuse({
     gmailCandidates: pendingGmail,
     receivedAt: pulledAt,
   })
+  const decisions = planMuseDecisions(batches, muse.decisions ?? [], pulledAt)
   // Sticky until acknowledged in Settings: a long absence may have let the relay trim unseen batches.
   const retentionGap = previous.retentionGap === true ||
     Boolean(previous.lastPulledAt && now.getTime() - Date.parse(previous.lastPulledAt) > RETENTION_WARNING_MS)
@@ -47,6 +49,8 @@ export async function pullMuse({
     entryWrites: plan.entryWrites,
     gmailResolutions: plan.gmailResolutions,
     syncState,
+    decisions,
   })
-  return { summary: plan.summary, batches: batches.length, retentionGap, pulledAt }
+  const newDecisions = decisions.filter((decision) => decision.state === 'open').length
+  return { summary: plan.summary, newDecisions, batches: batches.length, retentionGap, pulledAt }
 }

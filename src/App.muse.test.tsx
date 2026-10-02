@@ -28,7 +28,7 @@ function batch(id: string, contents: Partial<MuseBatch>): MuseIncomingBatch {
   return {
     id,
     receivedAt: '2026-10-02T12:00:00Z',
-    batch: { schema: MUSE_BATCH_SCHEMA, batchId: `run-${id}`, generatedAt: '2026-10-02T12:00:00Z', newEntries: [], statusUpdates: [], ...contents },
+    batch: { schema: MUSE_BATCH_SCHEMA, batchId: `run-${id}`, generatedAt: '2026-10-02T12:00:00Z', newEntries: [], statusUpdates: [], decisions: [], closeDecisions: [], ...contents },
   }
 }
 
@@ -80,7 +80,7 @@ describe('Muse sync in Paceboard', () => {
     const muse = fakeMuse([batch('1000-0', { newEntries: [scaleRole] })])
     render(<App repository={repository} museClient={muse.client} musePollIntervalMs={0} />)
 
-    expect(await screen.findByText('Muse: 1 needs review')).toBeVisible()
+    expect(await screen.findByText('Muse: 1 needs you')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Review, 1 pending' }))
     const card = await screen.findByRole('article', { name: 'Scale AI ML Research Intern' })
     expect(within(card).getByText('Possible duplicate')).toBeVisible()
@@ -130,6 +130,29 @@ describe('Muse sync in Paceboard', () => {
 
     await waitFor(async () => expect(await repository.listEntries()).toEqual([]))
     expect((await repository.getMuseData()).items[0]).toMatchObject({ state: 'dismissed', reason: 'undone' })
+  })
+
+  it('shows Muse questions in Review and sends the answer back through the ledger', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(KEY_STORAGE, 'paceboard-secret')
+    const muse = fakeMuse([batch('1000-0', { decisions: [{
+      id: 'q-delta', kind: 'pay', question: 'Pay is not listed. Apply anyway?', company: 'Delta', role: 'Data Science Intern',
+      options: [{ value: 'apply', label: 'Apply' }, { value: 'skip', label: 'Skip' }],
+    }] })])
+    render(<App repository={repository} museClient={muse.client} musePollIntervalMs={0} />)
+
+    expect(await screen.findByText('Muse: 1 needs you')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Review, 1 pending' }))
+    const card = await screen.findByRole('article', { name: 'Pay is not listed. Apply anyway?' })
+    await user.type(within(card).getByLabelText('Note for Muse (optional)'), 'Delta pays well')
+    await user.click(within(card).getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(muse.ledgers.at(-1)?.decisionAnswers).toEqual([
+      expect.objectContaining({ id: 'q-delta', value: 'apply', note: 'Delta pays well' }),
+    ]))
+    expect(muse.ledgers.at(-1)?.openDecisionIds).toBeUndefined()
+    await user.click(screen.getByRole('tab', { name: /Activity/ }))
+    expect(screen.getByRole('region', { name: 'Your answers to Muse' })).toHaveTextContent('You chose “Apply”')
   })
 
   it('disconnects and explains when the sync key is rejected', async () => {

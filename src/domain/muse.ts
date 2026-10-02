@@ -9,6 +9,7 @@ import type {
   AppSettings,
   GmailCandidate,
   MuseData,
+  MuseDecision,
   MuseEntryItem,
   MuseFillField,
   MuseItem,
@@ -37,7 +38,8 @@ export interface MuseIngestPlan {
   summary: MuseIngestSummary
 }
 
-const FILL_FIELDS: MuseFillField[] = ['url', 'source', 'resumeVariant', 'notes', 'origin']
+const ANSWER_RETENTION_MS = 30 * 86_400_000
+const FILL_FIELDS: MuseFillField[] = ['url', 'source', 'resumeVariant', 'notes', 'origin', 'postedDate']
 
 export function emptyMuseData(): MuseData {
   return { items: [], syncState: { key: 'muse' } }
@@ -194,6 +196,7 @@ export function createMuseApplication(payload: MuseEntryPayload, updatedAt = new
     resumeVariant: payload.resumeVariant,
     notes: payload.notes,
     origin: payload.origin,
+    postedDate: payload.postedDate,
     statusHistory: payload.statusHistory?.map((event) => ({ ...event })),
     updatedAt,
   })
@@ -280,6 +283,7 @@ export function buildLedger(
   syncState: MuseSyncState,
   pendingMuseReview: number,
   generatedAt = new Date().toISOString(),
+  decisions: MuseDecision[] = [],
 ): MuseLedger {
   const ledger: MuseLedger = {
     schema: MUSE_LEDGER_SCHEMA,
@@ -299,7 +303,32 @@ export function buildLedger(
   }
   if (syncState.cursor) ledger.museCursor = syncState.cursor
   if (syncState.lastPulledAt) ledger.lastPulledAt = syncState.lastPulledAt
+  // Answers stay visible for 30 days so Muse sees them even after a long gap between runs.
+  const cutoff = new Date(Date.parse(generatedAt) - ANSWER_RETENTION_MS).toISOString()
+  const answers = decisions
+    .filter((decision) => decision.state === 'answered' && decision.answer && decision.answer.answeredAt >= cutoff)
+    .map((decision) => withoutEmptyFields({ id: decision.id, value: decision.answer!.value, note: decision.answer!.note, answeredAt: decision.answer!.answeredAt }))
+  const open = decisions.filter((decision) => decision.state === 'open').map((decision) => decision.id)
+  if (answers.length) ledger.decisionAnswers = answers
+  if (open.length) ledger.openDecisionIds = open
   return ledger
+}
+
+/** New questions open; Muse can close one it settled itself. Answered or closed questions are never reopened. */
+export function planMuseDecisions(batches: MuseIncomingBatch[], existing: MuseDecision[], receivedAt: string): MuseDecision[] {
+  const byId = new Map(existing.map((decision) => [decision.id, decision]))
+  const changed = new Map<string, MuseDecision>()
+  for (const { id: streamId, batch } of batches) {
+    for (const payload of batch.decisions ?? []) {
+      if (byId.has(payload.id) || changed.has(payload.id)) continue
+      changed.set(payload.id, { id: payload.id, batchId: batch.batchId, streamId, payload, state: 'open', receivedAt })
+    }
+    for (const id of batch.closeDecisions ?? []) {
+      const current = changed.get(id) ?? byId.get(id)
+      if (current?.state === 'open') changed.set(id, { ...current, state: 'closed', closedAt: receivedAt })
+    }
+  }
+  return [...changed.values()]
 }
 
 export function ledgerHash(ledger: MuseLedger): string {

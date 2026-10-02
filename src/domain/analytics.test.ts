@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createApplication } from './entries'
 import { appendStatus } from './status'
-import { buildDailySeries, buildWeeklySeries, getEffortPerformance, getOutcomeMetrics, getPipelineSummary, getSourcePerformance, getWeekSummary, getResumePerformance } from './analytics'
+import { buildDailySeries, buildWeeklySeries, getEffortPerformance, getOutcomeMetrics, getPipelineSummary, getSourcePerformance, getWeekSummary, getResumePerformance, getApplySpeed } from './analytics'
 import type { ApplicationEffort } from './types'
 
 function entry(id: string, submittedDate: string, effort: ApplicationEffort = 'quick', source?: string) {
@@ -90,5 +90,18 @@ describe('resume performance', () => {
     expect(rows.map(({ resumeVariant, total, progressed, rejected }) => [resumeVariant, total, progressed, rejected])).toEqual([
       ['DS', 1, 0, 1], ['ML', 2, 1, 0], ['Not recorded', 1, 0, 0],
     ])
+  })
+})
+
+describe('speed to apply', () => {
+  it('measures days from posting to application for roles with a posting date', () => {
+    const make = (id: string, postedDate: string | undefined, submittedDate: string) =>
+      createApplication({ id, company: id, title: 'Intern', submittedDate, effort: 'quick', postedDate })
+    const speed = getApplySpeed([
+      make('a', '2026-09-28', '2026-09-28'), make('b', '2026-09-27', '2026-09-28'), make('c', '2026-09-20', '2026-09-28'),
+      make('d', '2026-09-25', '2026-09-28'), make('none', undefined, '2026-09-28'), make('later', '2026-09-30', '2026-09-28'),
+    ])
+    expect(speed).toMatchObject({ measured: 4, medianDays: 2, withinOneDayRate: 50 })
+    expect(speed.buckets.map(({ count }) => count)).toEqual([1, 1, 1, 0, 1])
   })
 })

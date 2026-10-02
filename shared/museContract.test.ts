@@ -36,7 +36,23 @@ describe('validateMuseBatch', () => {
 
   it('defaults missing item arrays to empty lists', () => {
     const result = validateMuseBatch({ schema: MUSE_BATCH_SCHEMA, batchId: 'run-2', generatedAt: '2026-10-01T18:07:12Z' })
-    expect(result.ok && result.batch).toMatchObject({ newEntries: [], statusUpdates: [] })
+    expect(result.ok && result.batch).toMatchObject({ newEntries: [], statusUpdates: [], decisions: [], closeDecisions: [] })
+  })
+
+  it('accepts posting dates and decisions, and rejects malformed decisions', () => {
+    const decision = {
+      id: 'decision-1', kind: 'pay', question: 'Pay is not listed. Apply anyway?', company: 'Delta', role: 'Data Science Intern',
+      url: 'https://delta.example/job', options: [{ value: 'apply', label: 'Apply' }, { value: 'skip', label: 'Skip' }],
+    }
+    const result = validateMuseBatch(batch({
+      newEntries: [{ ...batch().newEntries[0], postedDate: '2026-09-30' }],
+      decisions: [decision],
+      closeDecisions: ['decision-0'],
+    }))
+    expect(result.ok && result.batch).toMatchObject({ newEntries: [{ postedDate: '2026-09-30' }], decisions: [decision], closeDecisions: ['decision-0'] })
+    expect(issuesOf(batch({ decisions: [{ ...decision, kind: 'vibes' }] }))).toContain('decisions[0].kind')
+    expect(issuesOf(batch({ decisions: [{ ...decision, options: [] }] }))).toContain('decisions[0].options')
+    expect(issuesOf(batch({ newEntries: [{ ...batch().newEntries[0], postedDate: 'last week' }] }))).toContain('newEntries[0].postedDate')
   })
 
   it('accepts a status update targeted by company, title, and submission date', () => {

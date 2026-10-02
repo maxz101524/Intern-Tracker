@@ -167,6 +167,7 @@ export function ApplicationDrawer({
         nextActionCompletedAt: draft.nextActionCompleted ? entry?.nextActionCompletedAt : undefined,
         jobDescriptionExcerpt: draft.jobDescriptionExcerpt || undefined,
         origin: entry?.origin,
+        postedDate: entry?.postedDate,
         statusHistory: history.length ? history : undefined,
         updatedAt: new Date().toISOString(),
       })
@@ -256,7 +257,7 @@ export function ApplicationDrawer({
         </header>
 
         {entry && <div className="drawer-current-status drawer-glance" aria-label="Application summary">
-          <div><StatusBadge status={displayStatus} /><span>{[`Submitted ${formatShortDate(entry.submittedDate)}`, entry.source, entry.resumeVariant && `${entry.resumeVariant} resume`].filter(Boolean).join(' · ')}</span>{entry.url && <a href={entry.url} target="_blank" rel="noreferrer">Open posting <ExternalLink size={13} /></a>}</div>
+          <div><StatusBadge status={displayStatus} /><span>{[`Submitted ${formatShortDate(entry.submittedDate)}`, postedLabel(entry), entry.source, entry.resumeVariant && `${entry.resumeVariant} resume`].filter(Boolean).join(' · ')}</span>{entry.url && <a href={entry.url} target="_blank" rel="noreferrer">Open posting <ExternalLink size={13} /></a>}</div>
           {entry.notes && <p>{entry.notes.split('\n')[0]}</p>}
         </div>}
 
@@ -373,4 +374,10 @@ function isFocusable(element: HTMLElement): boolean {
     }
   }
   return true
+}
+
+function postedLabel(entry: ApplicationEntry): string | undefined {
+  if (!entry.postedDate) return undefined
+  const days = Math.round((Date.parse(entry.submittedDate) - Date.parse(entry.postedDate)) / 86_400_000)
+  return days <= 0 ? 'applied the day it was posted' : `posted ${days} ${days === 1 ? 'day' : 'days'} earlier`
 }

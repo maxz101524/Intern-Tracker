@@ -184,6 +184,37 @@ export function getResumePerformance(entries: ApplicationEntry[]): ResumePerform
   }))
 }
 
+export interface ApplySpeed {
+  measured: number
+  medianDays: number | null
+  withinOneDayRate: number
+  buckets: Array<{ label: string; count: number }>
+}
+
+const SPEED_BUCKETS: Array<{ label: string; max: number }> = [
+  { label: 'Same day', max: 0 }, { label: '1 day', max: 1 }, { label: '2–3 days', max: 3 },
+  { label: '4–7 days', max: 7 }, { label: '8+ days', max: Number.POSITIVE_INFINITY },
+]
+
+/** Days from the employer posting a role to the application, for roles where the posting date is known. */
+export function getApplySpeed(entries: ApplicationEntry[]): ApplySpeed {
+  const days = entries
+    .filter((entry) => entry.postedDate && entry.postedDate <= entry.submittedDate)
+    .map((entry) => Math.round((parseLocalDate(entry.submittedDate).getTime() - parseLocalDate(entry.postedDate!).getTime()) / 86_400_000))
+    .sort((a, b) => a - b)
+  const middle = Math.floor(days.length / 2)
+  const medianDays = !days.length ? null : days.length % 2 ? days[middle] : (days[middle - 1] + days[middle]) / 2
+  return {
+    measured: days.length,
+    medianDays,
+    withinOneDayRate: percent(days.filter((value) => value <= 1).length, days.length),
+    buckets: SPEED_BUCKETS.map((bucket, index) => ({
+      label: bucket.label,
+      count: days.filter((value) => value <= bucket.max && (index === 0 || value > SPEED_BUCKETS[index - 1].max)).length,
+    })),
+  }
+}
+
 export function formatShortDate(value: string): string {
   return parseLocalDate(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }

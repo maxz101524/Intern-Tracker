@@ -477,6 +477,23 @@ input:focus, select:focus, textarea:focus { border-color: var(--blue); }
 .muse-card-body h2 span { color: var(--muted); font-weight: 500; }
 .muse-card-body blockquote { margin: 0; padding: 12px 15px; border-left: 3px solid #c0c8da; color: var(--muted); background: #fafbfc; font-size: .74rem; line-height: 1.6; }
 .muse-reason { padding: 5px 8px; border-radius: 5px; color: #946c2c; background: var(--amber-pale); font-weight: 600; }
+.speed-panel { margin-top: 23px; }
+.speed-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 28px; margin-top: 18px; align-items: center; }
+.speed-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.speed-stats div { display: grid; gap: 6px; }
+.speed-stats span { color: var(--muted); font-size: .7rem; }
+.speed-stats strong { font-size: 1.35rem; font-weight: 650; letter-spacing: -.02em; }
+.speed-stats small { color: var(--muted); font-size: .72rem; font-weight: 500; }
+.speed-buckets { display: grid; gap: 8px; }
+.speed-buckets div { display: grid; grid-template-columns: 76px 1fr 28px; align-items: center; gap: 10px; font-size: .72rem; color: var(--muted); }
+.speed-buckets i { height: 8px; border-radius: 4px; background: var(--line-soft); overflow: hidden; }
+.speed-buckets b { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
+.speed-buckets strong { color: var(--ink); text-align: right; font-weight: 600; }
+.muse-reason.decision { color: var(--blue); background: var(--blue-pale); }
+.decision-note { display: grid; gap: 7px; color: var(--muted); font-size: .72rem; }
+.decision-note input { max-width: 520px; }
+.decision-actions { flex-wrap: wrap; }
+.muse-answers { margin-bottom: 16px; }
 .muse-reason.undone { color: var(--muted); background: #f0f1f4; }
 .muse-reason.invalid, .muse-reason.closed_application { color: var(--red); background: var(--red-pale); }
 .muse-reason-detail { margin: -6px 0 0; color: var(--muted); font-size: .74rem; }
@@ -653,6 +670,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--blue); }
   .pace-stats { grid-template-columns: 1fr 1fr; }
   .focus-action-controls .button.secondary { display: inline-flex; }
   .overview-grid, .analytics-grid { grid-template-columns: 1fr; }
+  .speed-body { grid-template-columns: 1fr; }
   .health-strip .metric { padding: 15px 12px; }
   .metric > span { font-size: .66rem; }
   .ledger-tools { flex-wrap: wrap; }

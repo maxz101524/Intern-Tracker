@@ -8,7 +8,7 @@ import {
   ledgerHash,
   undoMuseItem,
 } from '../domain/muse'
-import type { ApplicationEntry, AppSettings, MuseData, MuseEntryItem, MuseItem, MuseStatusItem } from '../domain/types'
+import type { ApplicationEntry, AppSettings, MuseData, MuseDecision, MuseEntryItem, MuseItem, MuseStatusItem } from '../domain/types'
 import { MuseRelayError, type MuseRelayClient, type MuseRelayErrorCode } from '../muse/client'
 import { clearMuseKey, getMuseKey, setMuseKey } from '../muse/keyStore'
 import { pullMuse, type MusePullOutcome } from '../muse/sync'
@@ -26,6 +26,8 @@ export interface MuseSyncController {
   pendingItems: MuseItem[]
   appliedItems: MuseItem[]
   dismissedItems: MuseItem[]
+  openDecisions: MuseDecision[]
+  answeredDecisions: MuseDecision[]
   lastResult: MusePullOutcome | null
   connect(key: string): Promise<void>
   disconnect(): void
@@ -36,6 +38,8 @@ export interface MuseSyncController {
   restore(item: MuseItem): Promise<void>
   undo(item: MuseItem): Promise<void>
   acknowledgeRetentionGap(): Promise<void>
+  answerDecision(decision: MuseDecision, option: { value: string; label: string }, note?: string): Promise<void>
+  reopenDecision(decision: MuseDecision): Promise<void>
   refresh(): Promise<void>
   clearLastResult(): void
 }
@@ -89,8 +93,10 @@ export function useMuseSync({
       const [currentEntries, currentSettings, muse] = await Promise.all([
         repository.listEntries(), repository.getSettings(), repository.getMuseData(),
       ])
-      const pending = muse.items.filter((item) => item.state === 'pending').length
-      const ledger = buildLedger(currentEntries, currentSettings, muse.syncState, pending)
+      const decisions = muse.decisions ?? []
+      const pending = muse.items.filter((item) => item.state === 'pending').length +
+        decisions.filter((decision) => decision.state === 'open').length
+      const ledger = buildLedger(currentEntries, currentSettings, muse.syncState, pending, undefined, decisions)
       const hash = ledgerHash(ledger)
       if (hash === muse.syncState.lastLedgerHash) return
       try {
@@ -155,7 +161,7 @@ export function useMuseSync({
     if (!connected || !settings) return
     const timer = window.setTimeout(() => { void publishLedger() }, LEDGER_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
-  }, [connected, entries, settings, data.items, publishLedger])
+  }, [connected, entries, settings, data.items, data.decisions, publishLedger])
 
   const connect = useCallback(async (key: string) => {
     const trimmed = key.trim()
@@ -243,6 +249,22 @@ export function useMuseSync({
     await refresh()
   }, [refresh, repository])
 
+  const answerDecision = useCallback(async (decision: MuseDecision, option: { value: string; label: string }, note?: string) => {
+    const answer = { value: option.value, label: option.label, answeredAt: new Date().toISOString(), ...(note?.trim() ? { note: note.trim() } : {}) }
+    await repository.saveMuseDecision({ ...decision, state: 'answered', answer })
+    await refresh()
+    // Muse checks the ledger at the start of each run, so share the answer right away.
+    void publishLedger()
+  }, [publishLedger, refresh, repository])
+
+  const reopenDecision = useCallback(async (decision: MuseDecision) => {
+    const reopened: MuseDecision = { ...decision, state: 'open' }
+    delete reopened.answer
+    await repository.saveMuseDecision(reopened)
+    await refresh()
+    void publishLedger()
+  }, [publishLedger, refresh, repository])
+
   const lists = useMemo(() => {
     const newestFirst = (left: MuseItem, right: MuseItem) =>
       (right.reviewedAt ?? right.receivedAt).localeCompare(left.reviewedAt ?? left.receivedAt)
@@ -250,8 +272,11 @@ export function useMuseSync({
       pendingItems: data.items.filter((item) => item.state === 'pending'),
       appliedItems: data.items.filter((item) => item.state === 'applied').sort(newestFirst),
       dismissedItems: data.items.filter((item) => item.state === 'dismissed').sort(newestFirst),
+      openDecisions: (data.decisions ?? []).filter((decision) => decision.state === 'open'),
+      answeredDecisions: (data.decisions ?? []).filter((decision) => decision.state === 'answered')
+        .sort((left, right) => (right.answer?.answeredAt ?? '').localeCompare(left.answer?.answeredAt ?? '')),
     }
-  }, [data.items])
+  }, [data.decisions, data.items])
 
   const clearLastResult = useCallback(() => setLastResult(null), [])
 
@@ -272,6 +297,8 @@ export function useMuseSync({
     restore,
     undo,
     acknowledgeRetentionGap,
+    answerDecision,
+    reopenDecision,
     refresh,
     clearLastResult,
   }

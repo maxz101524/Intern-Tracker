@@ -12,6 +12,8 @@ export function createApplication(input: ApplicationInput): ApplicationEntry {
   const statusHistory = normalizeHistory(input.statusHistory, input.submittedDate)
   const nextAction = clean(input.nextAction)
   const nextActionDueDate = clean(input.nextActionDueDate)
+  const postedDate = clean(input.postedDate)
+  if (postedDate && !isValidDateOnly(postedDate)) throw new Error('Posting date is not valid.')
   if (nextActionDueDate && !isValidDateOnly(nextActionDueDate)) throw new Error('Next-action due date is not valid.')
   if (nextActionDueDate && !nextAction) throw new Error('Choose a next action before adding a due date.')
 
@@ -32,6 +34,7 @@ export function createApplication(input: ApplicationInput): ApplicationEntry {
       ? normalizeIso(input.nextActionCompletedAt)
       : undefined,
     jobDescriptionExcerpt: clean(input.jobDescriptionExcerpt),
+    postedDate,
     origin: normalizeOrigin(input.origin),
     statusHistory,
     updatedAt: input.updatedAt ?? new Date().toISOString(),

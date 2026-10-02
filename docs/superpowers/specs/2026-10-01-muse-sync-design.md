@@ -115,6 +115,9 @@ Keys travel as `Authorization: Bearer <key>` and are compared in constant time o
 - `newRound` (optional boolean) tells Paceboard that an update in the role's current stage is a genuinely new round, such as a second assessment or a final interview. Without it, a same-stage update is treated as a duplicate report and skipped.
 - `dueDate` (optional, `YYYY-MM-DD`) marks a deadline for an assessment, screen, interview, or offer. When the role has no open next action, Paceboard creates one, for example "Complete the online assessment — HackerRank" due on that date, so it surfaces under Needs attention. An existing plan is never replaced, and undo removes only the action Muse created.
 - Muse should use the source and resume-variant labels published in the ledger's `vocabulary`.
+- `newEntries[].postedDate` (optional, `YYYY-MM-DD`) is the date the employer posted the role. Paceboard stores it and reports speed to apply (posting → submission) in Analytics.
+- `decisions` (optional) are questions Muse can't settle alone: `{ id, kind: pay|duplicate|eligibility|login|other, question, company?, role?, url?, detail?, options: [{ value, label }] }` (1–6 options). They appear first under Review → Muse. `closeDecisions: [id]` withdraws an open question Muse resolved itself.
+- The ledger carries `decisionAnswers: [{ id, value, note?, answeredAt }]` (answers from the last 30 days) and `openDecisionIds`. Muse reads them at the start of each run and acts on answers it hasn't handled yet. If Max changes an answer, the same id reappears with the new value and a later `answeredAt`.
 
 ## Paceboard ingest
 

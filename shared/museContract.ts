@@ -37,6 +37,7 @@ export interface MuseEntryPayload {
   notes?: string
   origin?: MuseOrigin
   statusHistory?: MuseHistoryEvent[]
+  postedDate?: string
 }
 
 export interface MuseMatch {
@@ -58,12 +59,36 @@ export interface MuseStatusPayload {
   newRound?: boolean
 }
 
+export const MUSE_DECISION_KINDS = ['pay', 'duplicate', 'eligibility', 'login', 'other'] as const
+export type MuseDecisionKind = (typeof MUSE_DECISION_KINDS)[number]
+
+// A question Muse can't settle alone. Max answers in Paceboard; the answer returns through the ledger.
+export interface MuseDecisionPayload {
+  id: string
+  kind: MuseDecisionKind
+  question: string
+  company?: string
+  role?: string
+  url?: string
+  detail?: string
+  options: Array<{ value: string; label: string }>
+}
+
 export interface MuseBatch {
   schema: typeof MUSE_BATCH_SCHEMA
   batchId: string
   generatedAt: string
   newEntries: MuseEntryPayload[]
   statusUpdates: MuseStatusPayload[]
+  decisions: MuseDecisionPayload[]
+  closeDecisions: string[]
+}
+
+export interface MuseDecisionAnswer {
+  id: string
+  value: string
+  note?: string
+  answeredAt: string
 }
 
 export interface MuseLedgerEntry {
@@ -85,6 +110,8 @@ export interface MuseLedger {
   pendingMuseReview: number
   vocabulary: { sources: string[]; resumeVariants: string[] }
   entries: MuseLedgerEntry[]
+  decisionAnswers?: MuseDecisionAnswer[]
+  openDecisionIds?: string[]
 }
 
 export const STREAM_ID_PATTERN = /^\d+-\d+$/
@@ -118,12 +145,16 @@ export function validateMuseBatch(value: unknown): BatchValidation {
   const generatedAt = timestamp(value.generatedAt, 'generatedAt', issues)
   const rawEntries = list(value.newEntries, 'newEntries', issues)
   const rawUpdates = list(value.statusUpdates, 'statusUpdates', issues)
-  if (rawEntries.length + rawUpdates.length > MUSE_MAX_ITEMS) {
+  const rawDecisions = list(value.decisions, 'decisions', issues)
+  const rawClosed = list(value.closeDecisions, 'closeDecisions', issues)
+  if (rawEntries.length + rawUpdates.length + rawDecisions.length + rawClosed.length > MUSE_MAX_ITEMS) {
     issues.push({ path: '$', message: `A batch may contain at most ${MUSE_MAX_ITEMS} items.` })
   }
 
   const newEntries = rawEntries.map((entry, index) => entryPayload(entry, `newEntries[${index}]`, issues))
   const statusUpdates = rawUpdates.map((update, index) => statusPayload(update, `statusUpdates[${index}]`, issues))
+  const decisions = rawDecisions.map((decision, index) => decisionPayload(decision, `decisions[${index}]`, issues))
+  const closeDecisions = rawClosed.map((id, index) => text(id, `closeDecisions[${index}]`, issues, { max: 200 }))
   if (issues.length) return { ok: false, issues }
   return {
     ok: true,
@@ -133,6 +164,8 @@ export function validateMuseBatch(value: unknown): BatchValidation {
       generatedAt: generatedAt as string,
       newEntries: newEntries as MuseEntryPayload[],
       statusUpdates: statusUpdates as MuseStatusPayload[],
+      decisions: decisions as MuseDecisionPayload[],
+      closeDecisions: closeDecisions as string[],
     },
   }
 }
@@ -178,6 +211,7 @@ function entryPayload(value: unknown, path: string, issues: ContractIssue[]): Mu
   }
   if (value.notes !== undefined && value.notes !== null) payload.notes = text(value.notes, `${path}.notes`, issues, { max: MAX_NOTES })
   if (value.origin !== undefined && value.origin !== null) payload.origin = origin(value.origin, `${path}.origin`, issues)
+  if (value.postedDate !== undefined && value.postedDate !== null) payload.postedDate = date(value.postedDate, `${path}.postedDate`, issues)
   if (value.statusHistory !== undefined && value.statusHistory !== null) {
     payload.statusHistory = list(value.statusHistory, `${path}.statusHistory`, issues).map((event, index) => {
       const eventPath = `${path}.statusHistory[${index}]`
@@ -235,6 +269,34 @@ function statusPayload(value: unknown, path: string, issues: ContractIssue[]): M
     else if (value.newRound) payload.newRound = true
   }
   return withoutUndefined(payload) as MuseStatusPayload
+}
+
+function decisionPayload(value: unknown, path: string, issues: ContractIssue[]): MuseDecisionPayload | null {
+  if (!isRecord(value)) { issues.push({ path, message: 'Expected an object.' }); return null }
+  const payload: Partial<MuseDecisionPayload> = {
+    id: text(value.id, `${path}.id`, issues, { max: 200 }),
+    question: text(value.question, `${path}.question`, issues),
+  }
+  if (!MUSE_DECISION_KINDS.includes(value.kind as MuseDecisionKind)) {
+    issues.push({ path: `${path}.kind`, message: `Expected one of ${MUSE_DECISION_KINDS.join(', ')}.` })
+  } else {
+    payload.kind = value.kind as MuseDecisionKind
+  }
+  for (const field of ['company', 'role', 'url'] as const) {
+    if (value[field] !== undefined && value[field] !== null) payload[field] = text(value[field], `${path}.${field}`, issues)
+  }
+  if (value.detail !== undefined && value.detail !== null) payload.detail = text(value.detail, `${path}.detail`, issues, { max: MAX_NOTES })
+  const options = Array.isArray(value.options) ? value.options : []
+  if (options.length < 1 || options.length > 6) issues.push({ path: `${path}.options`, message: 'Provide 1 to 6 options.' })
+  payload.options = options.map((option, index) => {
+    const optionPath = `${path}.options[${index}]`
+    if (!isRecord(option)) { issues.push({ path: optionPath, message: 'Expected { value, label }.' }); return { value: '', label: '' } }
+    return {
+      value: text(option.value, `${optionPath}.value`, issues, { max: 100 }) ?? '',
+      label: text(option.label, `${optionPath}.label`, issues, { max: 100 }) ?? '',
+    }
+  })
+  return withoutUndefined(payload) as MuseDecisionPayload
 }
 
 function origin(value: unknown, path: string, issues: ContractIssue[]): MuseOrigin | undefined {

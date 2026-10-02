@@ -241,7 +241,7 @@ describe('TrackerRepository Muse sync', () => {
     repository = new TrackerRepository(name)
     expect(await repository.listEntries()).toEqual([existing])
     expect(await repository.listGmailCandidates()).toHaveLength(1)
-    expect(await repository.getMuseData()).toEqual({ items: [], syncState: { key: 'muse' } })
+    expect(await repository.getMuseData()).toEqual({ items: [], decisions: [], syncState: { key: 'muse' } })
   })
 
   it('commits Muse items, entries, Gmail resolutions, and the cursor together', async () => {
@@ -256,7 +256,7 @@ describe('TrackerRepository Muse sync', () => {
     })
 
     expect(await repository.listEntries()).toEqual([application])
-    expect(await repository.getMuseData()).toEqual({ items: [museItem()], syncState: { key: 'muse', cursor: '1000-0', lastPulledAt: '2026-10-02T12:00:00.000Z' } })
+    expect(await repository.getMuseData()).toEqual({ items: [museItem()], decisions: [], syncState: { key: 'muse', cursor: '1000-0', lastPulledAt: '2026-10-02T12:00:00.000Z' } })
     expect(await repository.getGmailCandidate(candidate.messageId)).toMatchObject({ state: 'imported', linkedEntryId: 'm-1' })
     expect(await repository.hasProcessedGmailMessage(candidate.messageId)).toBe(true)
   })
@@ -282,7 +282,7 @@ describe('TrackerRepository Muse sync', () => {
     const settings = { weeklyTarget: 35, sources: ['Company site'], lastBackupAt: null }
     const muse = { items: [museItem()], syncState: { key: 'muse' as const, cursor: '1000-0' } }
     await repository.restoreFromJson(JSON.stringify(buildBackup([], settings, emptyGmailImportData(), undefined, muse)))
-    expect(await repository.getMuseData()).toEqual(muse)
+    expect(await repository.getMuseData()).toEqual({ ...muse, decisions: [] })
 
     const newer = { items: [museItem({ key: 'status:e-1', kind: 'status', streamId: '2000-0', payload: { id: 'e-1', entryId: 'm-1', status: 'rejected', date: '2026-10-05', confidence: 'high' } } as Partial<MuseItem>)], syncState: { key: 'muse' as const, cursor: '2000-0' } }
     await repository.restoreFromJson(JSON.stringify(buildBackup([], settings, emptyGmailImportData(), undefined, newer)), 'merge')
@@ -291,7 +291,7 @@ describe('TrackerRepository Muse sync', () => {
     expect(merged.syncState.cursor).toBe('2000-0')
 
     await repository.restoreFromJson(JSON.stringify(buildBackup([], settings, emptyGmailImportData())))
-    expect(await repository.getMuseData()).toEqual({ items: [], syncState: { key: 'muse' } })
+    expect(await repository.getMuseData()).toEqual({ items: [], decisions: [], syncState: { key: 'muse' } })
   })
 })
 

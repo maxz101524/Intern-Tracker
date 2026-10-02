@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { MUSE_BATCH_SCHEMA, type MuseBatch, type MuseEntryPayload, type MuseStatusPayload } from '../../shared/museContract'
 import { createApplication } from './entries'
 import { createGmailCandidate } from './gmail'
-import { buildLedger, fillBlankFields, ledgerHash, planMuseIngest, undoMuseItem, type MuseIncomingBatch } from './muse'
+import { buildLedger, fillBlankFields, ledgerHash, planMuseDecisions, planMuseIngest, undoMuseItem, type MuseIncomingBatch } from './muse'
 import { normalizeSettings } from './settings'
 import { appendStatus } from './status'
-import type { ApplicationEntry, GmailCandidate } from './types'
+import type { ApplicationEntry, GmailCandidate, MuseDecision } from './types'
 
 const RECEIVED = '2026-10-02T12:00:00.000Z'
 
@@ -22,7 +22,7 @@ function statusPayload(overrides: Partial<MuseStatusPayload> = {}): MuseStatusPa
 }
 
 function incoming(newEntries: MuseEntryPayload[] = [], statusUpdates: MuseStatusPayload[] = [], id = '1000-0'): MuseIncomingBatch {
-  const batch: MuseBatch = { schema: MUSE_BATCH_SCHEMA, batchId: `batch-${id}`, generatedAt: RECEIVED, newEntries, statusUpdates }
+  const batch: MuseBatch = { schema: MUSE_BATCH_SCHEMA, batchId: `batch-${id}`, generatedAt: RECEIVED, newEntries, statusUpdates, decisions: [], closeDecisions: [] }
   return { id, receivedAt: RECEIVED, batch }
 }
 
@@ -233,5 +233,44 @@ describe('Muse helpers', () => {
     expect(JSON.stringify(ledger)).not.toContain('secret')
     expect(ledgerHash(ledger)).toBe(ledgerHash({ ...ledger, generatedAt: '2030-01-01T00:00:00.000Z' }))
     expect(ledgerHash(ledger)).not.toBe(ledgerHash({ ...ledger, pendingMuseReview: 3 }))
+  })
+})
+
+describe('Muse decisions', () => {
+  const question = {
+    id: 'decision-1', kind: 'pay' as const, question: 'Pay is not listed. Apply anyway?', company: 'Delta', role: 'Data Science Intern',
+    options: [{ value: 'apply', label: 'Apply' }, { value: 'skip', label: 'Skip' }],
+  }
+  const withDecisions = (id: string, decisions: typeof question[], closeDecisions: string[] = []): MuseIncomingBatch => ({
+    ...incoming([], [], id), batch: { ...incoming([], [], id).batch, decisions, closeDecisions },
+  })
+
+  it('opens new questions once and lets Muse close open ones', () => {
+    const opened = planMuseDecisions([withDecisions('1000-0', [question])], [], RECEIVED)
+    expect(opened).toEqual([expect.objectContaining({ id: 'decision-1', state: 'open', streamId: '1000-0', receivedAt: RECEIVED })])
+    expect(planMuseDecisions([withDecisions('1001-0', [question])], opened, RECEIVED)).toEqual([])
+
+    const closed = planMuseDecisions([withDecisions('1002-0', [], ['decision-1'])], opened, RECEIVED)
+    expect(closed).toEqual([expect.objectContaining({ id: 'decision-1', state: 'closed', closedAt: RECEIVED })])
+
+    const answered: MuseDecision = { ...opened[0], state: 'answered', answer: { value: 'apply', label: 'Apply', answeredAt: RECEIVED } }
+    expect(planMuseDecisions([withDecisions('1003-0', [], ['decision-1'])], [answered], RECEIVED)).toEqual([])
+  })
+
+  it('publishes recent answers and open question ids in the ledger', () => {
+    const settings = normalizeSettings({ weeklyTarget: 10 })
+    const decisions: MuseDecision[] = [
+      { id: 'a', batchId: 'b', streamId: '1-0', payload: { ...question, id: 'a' }, state: 'answered', receivedAt: RECEIVED, answer: { value: 'apply', label: 'Apply', note: 'Delta pays well', answeredAt: RECEIVED } },
+      { id: 'old', batchId: 'b', streamId: '1-0', payload: { ...question, id: 'old' }, state: 'answered', receivedAt: RECEIVED, answer: { value: 'skip', label: 'Skip', answeredAt: '2026-08-01T00:00:00.000Z' } },
+      { id: 'open', batchId: 'b', streamId: '1-0', payload: { ...question, id: 'open' }, state: 'open', receivedAt: RECEIVED },
+    ]
+    const ledger = buildLedger([], settings, { key: 'muse' }, 1, RECEIVED, decisions)
+    expect(ledger.decisionAnswers).toEqual([{ id: 'a', value: 'apply', note: 'Delta pays well', answeredAt: RECEIVED }])
+    expect(ledger.openDecisionIds).toEqual(['open'])
+  })
+
+  it('keeps Muse’s posting date on new roles', () => {
+    const result = plan([incoming([entryPayload({ postedDate: '2026-09-29' })])])
+    expect(result.entryWrites[0].postedDate).toBe('2026-09-29')
   })
 })

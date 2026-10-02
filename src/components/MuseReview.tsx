@@ -1,7 +1,8 @@
 import { AlertTriangle, Check, CircleCheck, ExternalLink, FilePlus2, GitMerge, History, RotateCcw, Sparkles, Trash2, Undo2 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { statusLabel } from '../domain/status'
-import type { ApplicationEntry, MuseEntryItem, MuseFillField, MuseItem, MuseReviewReason, MuseStatusItem } from '../domain/types'
+import type { MuseDecisionKind } from '../../shared/museContract'
+import type { ApplicationEntry, MuseDecision, MuseEntryItem, MuseFillField, MuseItem, MuseReviewReason, MuseStatusItem } from '../domain/types'
 import type { MuseSyncController } from '../hooks/useMuseSync'
 import { ApplicationPicker } from './GmailReview'
 
@@ -15,7 +16,11 @@ const REASONS: Record<MuseReviewReason, { label: string; detail: string }> = {
 }
 
 const FIELD_LABELS: Record<MuseFillField, string> = {
-  url: 'job link', source: 'source', resumeVariant: 'resume', notes: 'notes', origin: 'confirmation email',
+  url: 'job link', source: 'source', resumeVariant: 'resume', notes: 'notes', origin: 'confirmation email', postedDate: 'posting date',
+}
+
+const DECISION_KINDS: Record<MuseDecisionKind, string> = {
+  pay: 'Pay not listed', duplicate: 'Possible duplicate', eligibility: 'Eligibility', login: 'Sign-in needed', other: 'Question',
 }
 
 type Tab = 'review' | 'activity' | 'dismissed'
@@ -23,6 +28,7 @@ type Tab = 'review' | 'activity' | 'dismissed'
 export function MuseReview({ muse, entries, switcher }: { muse: MuseSyncController; entries: ApplicationEntry[]; switcher?: ReactNode }) {
   const [tab, setTab] = useState<Tab>('review')
   const entryById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
+  const waiting = muse.openDecisions.length + muse.pendingItems.length
 
   return (
     <div className="page-content review-page">
@@ -31,13 +37,14 @@ export function MuseReview({ muse, entries, switcher }: { muse: MuseSyncControll
       </header>
       {switcher}
       <div className="review-tabs" role="tablist">
-        <TabButton active={tab === 'review'} onClick={() => setTab('review')} label="Needs review" count={muse.pendingItems.length} />
+        <TabButton active={tab === 'review'} onClick={() => setTab('review')} label="Needs review" count={waiting} />
         <TabButton active={tab === 'activity'} onClick={() => setTab('activity')} label="Activity" count={muse.appliedItems.length} />
         <TabButton active={tab === 'dismissed'} onClick={() => setTab('dismissed')} label="Dismissed" count={muse.dismissedItems.length} />
       </div>
 
-      {tab === 'review' && (muse.pendingItems.length ? (
+      {tab === 'review' && (waiting ? (
         <div className="muse-card-list">
+          {muse.openDecisions.map((decision) => <DecisionCard key={decision.id} decision={decision} muse={muse} />)}
           {muse.pendingItems.map((item) => item.kind === 'entry'
             ? <EntryCard key={item.key} item={item} suggestion={entryById.get(item.suggestedEntryIds?.[0] ?? '')} muse={muse} />
             : <StatusCard key={item.key} item={item} entries={entries} muse={muse} />)}
@@ -46,7 +53,10 @@ export function MuseReview({ muse, entries, switcher }: { muse: MuseSyncControll
         <section className="review-empty"><span><CircleCheck size={28} /></span><h2>Nothing needs you</h2><p>{muse.connected ? 'New roles and status changes from Muse are applied automatically. Anything ambiguous will wait here.' : 'Connect Muse in Settings & data to receive roles and status changes automatically.'}</p></section>
       ))}
 
-      {tab === 'activity' && <ActivityList items={muse.appliedItems} entryById={entryById} onUndo={muse.undo} />}
+      {tab === 'activity' && <>
+        {muse.answeredDecisions.length > 0 && <AnsweredList decisions={muse.answeredDecisions} onChange={muse.reopenDecision} />}
+        <ActivityList items={muse.appliedItems} entryById={entryById} onUndo={muse.undo} />
+      </>}
       {tab === 'dismissed' && <DismissedList items={muse.dismissedItems} entryById={entryById} onRestore={muse.restore} />}
     </div>
   )
@@ -140,6 +150,41 @@ function StatusCard({ item, entries, muse }: { item: MuseStatusItem; entries: Ap
         {item.reason !== 'invalid' && <button type="button" className="button primary" disabled={busy || !entryId} onClick={() => void run(() => muse.applyStatus(item, entryId))}><Check size={16} /> Apply update</button>}
       </div>
     </article>
+  )
+}
+
+function DecisionCard({ decision, muse }: { decision: MuseDecision; muse: MuseSyncController }) {
+  const { busy, error, run } = useAction()
+  const [note, setNote] = useState('')
+  const question = decision.payload
+  return (
+    <article className="review-card muse-card" aria-label={question.question}>
+      <div className="muse-card-body">
+        <div className="review-progress"><span className="muse-reason decision">{DECISION_KINDS[question.kind]}</span><time dateTime={decision.receivedAt}>Asked by Muse · {new Date(decision.receivedAt).toLocaleString()}</time></div>
+        <p className="context-label">Muse needs your call</p>
+        <h2>{question.question}</h2>
+        {(question.company || question.role) && <p className="muse-match"><strong>{question.company}</strong>{question.role ? ` — ${question.role}` : ''}</p>}
+        {question.detail && <blockquote>{question.detail}</blockquote>}
+        {question.url && <a className="muse-link" href={question.url} target="_blank" rel="noreferrer">Open posting <ExternalLink size={14} /></a>}
+        <label className="decision-note">Note for Muse (optional)<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Anything Muse should know" /></label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+      </div>
+      <div className="review-actions muse-actions decision-actions">
+        <span className="drawer-action-spacer" />
+        {question.options.map((option, index) => <button key={option.value} type="button" className={`button ${index === 0 ? 'primary' : 'secondary'}`} disabled={busy} onClick={() => void run(() => muse.answerDecision(decision, option, note))}>{option.label}</button>)}
+      </div>
+    </article>
+  )
+}
+
+function AnsweredList({ decisions, onChange }: { decisions: MuseDecision[]; onChange: (decision: MuseDecision) => Promise<void> }) {
+  return (
+    <section className="dismissed-list muse-answers" aria-label="Your answers to Muse"><h2>Your answers</h2>
+      {decisions.slice(0, 30).map((decision) => <article key={decision.id}>
+        <div><strong>{decision.payload.question}</strong>{(decision.payload.company || decision.payload.role) && <span>{[decision.payload.company, decision.payload.role].filter(Boolean).join(' — ')}</span>}<small>You chose “{decision.answer?.label}”{decision.answer?.note ? ` · ${decision.answer.note}` : ''}</small></div>
+        <button type="button" className="button secondary" onClick={() => void onChange(decision)}><RotateCcw size={15} /> Change</button>
+      </article>)}
+    </section>
   )
 }
 

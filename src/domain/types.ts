@@ -1,4 +1,4 @@
-import type { MuseEntryPayload, MuseStatusPayload } from '../../shared/museContract'
+import type { MuseDecisionPayload, MuseEntryPayload, MuseStatusPayload } from '../../shared/museContract'
 
 export type ApplicationEffort = 'quick' | 'targeted'
 
@@ -40,6 +40,7 @@ export interface ApplicationEntry {
   nextActionCompleted?: boolean
   nextActionCompletedAt?: string
   jobDescriptionExcerpt?: string
+  postedDate?: string
   origin?: ApplicationOrigin
   statusHistory: StatusEvent[]
   updatedAt: string
@@ -139,7 +140,7 @@ export type MuseReviewReason =
   | 'closed_application'
   | 'undone'
 
-export type MuseFillField = 'url' | 'source' | 'resumeVariant' | 'notes' | 'origin'
+export type MuseFillField = 'url' | 'source' | 'resumeVariant' | 'notes' | 'origin' | 'postedDate'
 
 interface MuseItemBase {
   key: string
@@ -176,8 +177,20 @@ export interface MuseSyncState {
   retentionGap?: boolean
 }
 
+export interface MuseDecision {
+  id: string
+  batchId: string
+  streamId: string
+  payload: MuseDecisionPayload
+  state: 'open' | 'answered' | 'closed'
+  answer?: { value: string; label: string; note?: string; answeredAt: string }
+  receivedAt: string
+  closedAt?: string
+}
+
 export interface MuseData {
   items: MuseItem[]
+  decisions?: MuseDecision[]
   syncState: MuseSyncState
 }
 

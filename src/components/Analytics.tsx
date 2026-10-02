@@ -1,6 +1,6 @@
 import { Info } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { buildWeeklySeries, getEffortPerformance, getOutcomeMetrics, getPipelineSummary, getResumePerformance, getSourcePerformance } from '../domain/analytics'
+import { buildWeeklySeries, getApplySpeed, getEffortPerformance, getOutcomeMetrics, getPipelineSummary, getResumePerformance, getSourcePerformance } from '../domain/analytics'
 import { statusLabel, todayDate } from '../domain/status'
 import type { ApplicationEntry, ApplicationFilterState, DisplayStatus } from '../domain/types'
 
@@ -26,6 +26,8 @@ export function Analytics({ entries, onOpenApplications }: {
   const effort = getEffortPerformance(rangedEntries)
   const sources = getSourcePerformance(rangedEntries).sort((a, b) => b.total - a.total)
   const resumes = getResumePerformance(rangedEntries).sort((a, b) => b.total - a.total)
+  const speed = getApplySpeed(rangedEntries)
+  const maxSpeedBucket = Math.max(1, ...speed.buckets.map(({ count }) => count))
   const maxWeek = Math.max(1, ...weekly.map(({ total }) => total))
   const maxPipeline = Math.max(1, ...Object.values(pipeline))
   const rangeFilters = { fromDate: dates.from, toDate: dates.to }
@@ -55,6 +57,19 @@ export function Analytics({ entries, onOpenApplications }: {
         <section className="panel distribution-panel"><div className="section-heading"><div><h2>Pipeline distribution</h2><p>Select a row to open that filtered ledger.</p></div></div><div className="distribution-list">{pipelineOrder.map((status) => <button type="button" key={status} onClick={() => onOpenApplications({ ...rangeFilters, status })}><span>{statusLabel(status)}</span><i><b className={`status-${status}`} style={{ width: `${pipeline[status] / maxPipeline * 100}%` }} /></i><strong>{pipeline[status]}</strong></button>)}</div></section>
       </div>
 
+      <section className="panel performance-section speed-panel" aria-labelledby="speed-title">
+        <div className="section-heading"><div><h2 id="speed-title">Speed to apply</h2><p>Days from the employer posting a role to your application. Earlier applications are more likely to be screened.</p></div></div>
+        {speed.measured ? <div className="speed-body">
+          <div className="speed-stats">
+            <div><span>Median</span><strong>{speed.medianDays === 0 ? 'Same day' : `${speed.medianDays} ${speed.medianDays === 1 ? 'day' : 'days'}`}</strong></div>
+            <div><span>Within 1 day</span><strong>{speed.withinOneDayRate}%</strong></div>
+            <div><span>Measured</span><strong>{speed.measured}<small> of {rangedEntries.length}</small></strong></div>
+          </div>
+          <div className="speed-buckets" role="img" aria-label={speed.buckets.map(({ label, count }) => `${label}: ${count}`).join(', ')}>
+            {speed.buckets.map(({ label, count }) => <div key={label}><span>{label}</span><i><b style={{ width: `${count / maxSpeedBucket * 100}%` }} /></i><strong>{count}</strong></div>)}
+          </div>
+        </div> : <div className="empty-state"><strong>No posting dates yet</strong><span>Muse adds the posting date to roles it submits from now on, so this fills in automatically.</span></div>}
+      </section>
       <PerformanceSection title="Resume performance" label="Resume" description="Which resume version earns replies and progress." rows={resumes.map((row) => ({ ...row, name: row.resumeVariant }))} empty="No resume data yet." />
       <PerformanceSection title="Source performance" label="Source" description="Counts and rates by application channel." rows={sources.map((row) => ({ ...row, name: row.source }))} empty="No source data yet." />
       <PerformanceSection title="Effort comparison" label="Effort" description="Counts and rates by the time invested." rows={effort.map((row) => ({ ...row, name: row.effort === 'quick' ? 'Quick' : 'Targeted' }))} />

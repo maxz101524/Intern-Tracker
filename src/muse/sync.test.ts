@@ -21,7 +21,7 @@ function incoming(id: string, batch: Partial<MuseBatch>): MuseIncomingBatch {
   return {
     id,
     receivedAt: '2026-10-02T12:00:00Z',
-    batch: { schema: MUSE_BATCH_SCHEMA, batchId: `run-${id}`, generatedAt: '2026-10-02T12:00:00Z', newEntries: [], statusUpdates: [], ...batch },
+    batch: { schema: MUSE_BATCH_SCHEMA, batchId: `run-${id}`, generatedAt: '2026-10-02T12:00:00Z', newEntries: [], statusUpdates: [], decisions: [], closeDecisions: [], ...batch },
   }
 }
 
@@ -55,11 +55,23 @@ describe('pullMuse', () => {
     expect(await repository.listEntries()).toHaveLength(1)
   })
 
+  it('stores Muse questions and closes them when Muse says so', async () => {
+    const question = { id: 'q-1', kind: 'login' as const, question: 'Intuit sign-in failed twice. Take over?', options: [{ value: 'takeover', label: 'I’ll take over' }] }
+    const client = fakeClient([incoming('1000-0', { decisions: [question] })])
+    const first = await pullMuse({ client, repository })
+    expect(first.newDecisions).toBe(1)
+    expect((await repository.getMuseData()).decisions).toEqual([expect.objectContaining({ id: 'q-1', state: 'open' })])
+
+    const closing = fakeClient([incoming('1000-0', { decisions: [question] }), incoming('2000-0', { closeDecisions: ['q-1'] })])
+    await pullMuse({ client: closing, repository })
+    expect((await repository.getMuseData()).decisions).toEqual([expect.objectContaining({ id: 'q-1', state: 'closed' })])
+  })
+
   it('leaves data untouched when the relay is unreachable', async () => {
     const client = fakeClient([incoming('1000-0', { newEntries: [role] })])
     client.failNext = true
     await expect(pullMuse({ client, repository })).rejects.toMatchObject({ code: 'network' })
-    expect(await repository.getMuseData()).toEqual({ items: [], syncState: { key: 'muse' } })
+    expect(await repository.getMuseData()).toEqual({ items: [], decisions: [], syncState: { key: 'muse' } })
   })
 
   it('flags a possible retention gap after a long absence', async () => {

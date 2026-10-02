@@ -65,6 +65,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   const { lastResult: gmailResult, clearLastResult: clearGmailResult } = gmail
   const muse = useMuseSync({ repository, client: museClient, entries, settings, onEntriesChanged: load, pollIntervalMs: musePollIntervalMs })
   const { lastResult: museResult, clearLastResult: clearMuseResult } = muse
+  const museWaiting = muse.pendingItems.length + muse.openDecisions.length
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
@@ -80,7 +81,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
   }, [gmailResult, clearGmailResult])
   useEffect(() => {
     if (!museResult) return
-    const message = describeMusePull(museResult.summary)
+    const message = describeMusePull(museResult.summary, museResult.newDecisions)
     if (message) setToast({ message })
     clearMuseResult()
   }, [museResult, clearMuseResult])
@@ -103,7 +104,7 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
     scrollPositions.current[page] = window.scrollY
     // Choose the review source on arrival so resolving the last item doesn't switch views underneath you.
     if (next === 'review' && page !== 'review') {
-      setReviewSource(gmail.pendingCandidates.length === 0 && muse.pendingItems.length > 0 ? 'muse' : 'gmail')
+      setReviewSource(gmail.pendingCandidates.length === 0 && museWaiting > 0 ? 'muse' : 'gmail')
     }
     setPage(next)
     requestAnimationFrame(() => {
@@ -208,10 +209,10 @@ export function App({ repository = trackerRepository, gmailAuth = defaultGmailAu
     ? 'Your applications live only in this browser. Download a backup to keep a copy.'
     : `${changesSinceBackup} ${changesSinceBackup === 1 ? 'change' : 'changes'} since your last backup ${Math.floor(backupAgeDays)} days ago.`
   const week = getWeekSummary(entries, settings.weeklyTarget, new Date(), settings.applicationDays)
-  const reviewCount = gmail.pendingCandidates.length + muse.pendingItems.length
+  const reviewCount = gmail.pendingCandidates.length + museWaiting
   const reviewSwitcher = <div className="source-switch" role="group" aria-label="Review source">
     <button type="button" aria-pressed={reviewSource === 'gmail'} onClick={() => setReviewSource('gmail')}><Mail size={15} /> Gmail <span>{gmail.pendingCandidates.length}</span></button>
-    <button type="button" aria-pressed={reviewSource === 'muse'} onClick={() => setReviewSource('muse')}><Bot size={15} /> Muse <span>{muse.pendingItems.length}</span></button>
+    <button type="button" aria-pressed={reviewSource === 'muse'} onClick={() => setReviewSource('muse')}><Bot size={15} /> Muse <span>{museWaiting}</span></button>
   </div>
   const pageLabels: Record<Page, string> = { overview: 'Overview', applications: 'Applications', review: 'Review', analytics: 'Analytics', settings: 'Settings & data' }
 
@@ -267,13 +268,14 @@ function lastPullLabel(lastPulledAt?: string): string {
   return hours < 24 ? `Checked ${hours} h ago` : `Checked ${new Date(lastPulledAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 }
 
-function describeMusePull(summary: { created: number; filled: number; statuses: number; review: number }): string {
+function describeMusePull(summary: { created: number; filled: number; statuses: number; review: number }, questions = 0): string {
   const parts = [
     summary.created && `${summary.created} ${summary.created === 1 ? 'role' : 'roles'} added`,
     summary.statuses && `${summary.statuses} status ${summary.statuses === 1 ? 'update' : 'updates'}`,
     summary.filled && `${summary.filled} ${summary.filled === 1 ? 'role' : 'roles'} filled in`,
   ].filter(Boolean)
-  const review = summary.review ? `${summary.review} ${summary.review === 1 ? 'needs' : 'need'} review` : ''
+  const waiting = summary.review + questions
+  const review = waiting ? `${waiting} ${waiting === 1 ? 'needs' : 'need'} you` : ''
   if (!parts.length && !review) return ''
   return `Muse: ${[parts.join(', '), review].filter(Boolean).join(' · ')}`
 }

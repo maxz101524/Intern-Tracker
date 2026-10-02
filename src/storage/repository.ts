@@ -13,6 +13,7 @@ import type {
   GmailImportData,
   GmailSyncState,
   MuseData,
+  MuseDecision,
   MuseItem,
   MuseSyncState,
   ProcessedGmailMessage,
@@ -28,6 +29,7 @@ interface TrackerDatabase extends Dexie {
   gmailSync: EntityTable<GmailSyncState, 'key'>
   museItems: EntityTable<MuseItem, 'key'>
   museSync: EntityTable<MuseSyncState, 'key'>
+  museDecisions: EntityTable<MuseDecision, 'id'>
 }
 
 export interface GmailSyncCommit {
@@ -42,6 +44,7 @@ export interface MuseIngestCommit {
   entryWrites: ApplicationEntry[]
   gmailResolutions: GmailCandidate[]
   syncState: MuseSyncState
+  decisions?: MuseDecision[]
 }
 
 export interface MuseItemReview {
@@ -96,6 +99,16 @@ export class TrackerRepository {
       museItems: 'key, state, kind, receivedAt',
       museSync: 'key',
     })
+    this.db.version(6).stores({
+      entries: 'id, submittedDate, effort, source, company, updatedAt, origin.messageId',
+      settings: 'key',
+      gmailCandidates: 'messageId, state, kind, submittedDate, createdAt',
+      processedGmailMessages: 'messageId, disposition, processedAt',
+      gmailSync: 'key',
+      museItems: 'key, state, kind, receivedAt',
+      museSync: 'key',
+      museDecisions: 'id, state, receivedAt',
+    })
     this.db.entries = this.db.table('entries')
     this.db.settings = this.db.table('settings')
     this.db.gmailCandidates = this.db.table('gmailCandidates')
@@ -103,6 +116,7 @@ export class TrackerRepository {
     this.db.gmailSync = this.db.table('gmailSync')
     this.db.museItems = this.db.table('museItems')
     this.db.museSync = this.db.table('museSync')
+    this.db.museDecisions = this.db.table('museDecisions')
   }
 
   async listEntries(): Promise<ApplicationEntry[]> {
@@ -279,8 +293,14 @@ export class TrackerRepository {
   }
 
   async getMuseData(): Promise<MuseData> {
-    const [items, syncState] = await Promise.all([this.db.museItems.toArray(), this.db.museSync.get('muse')])
-    return { items: sortMuseItems(items), syncState: syncState ?? emptyMuseData().syncState }
+    const [items, decisions, syncState] = await Promise.all([
+      this.db.museItems.toArray(), this.db.museDecisions.toArray(), this.db.museSync.get('muse'),
+    ])
+    return {
+      items: sortMuseItems(items),
+      decisions: decisions.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt)),
+      syncState: syncState ?? emptyMuseData().syncState,
+    }
   }
 
   async saveMuseSyncState(state: MuseSyncState): Promise<void> {
@@ -298,10 +318,11 @@ export class TrackerRepository {
   async commitMuseIngest(commit: MuseIngestCommit): Promise<void> {
     await this.db.transaction(
       'rw',
-      [this.db.entries, this.db.museItems, this.db.museSync, this.db.gmailCandidates, this.db.processedGmailMessages, this.db.settings],
+      [this.db.entries, this.db.museItems, this.db.museSync, this.db.museDecisions, this.db.gmailCandidates, this.db.processedGmailMessages, this.db.settings],
       async () => {
         await this.db.entries.bulkPut(commit.entryWrites)
         await this.db.museItems.bulkPut(commit.items)
+        if (commit.decisions?.length) await this.db.museDecisions.bulkPut(commit.decisions)
         await this.db.gmailCandidates.bulkPut(commit.gmailResolutions)
         await this.db.processedGmailMessages.bulkPut(commit.gmailResolutions.map((candidate) => ({
           messageId: candidate.messageId,
@@ -313,6 +334,13 @@ export class TrackerRepository {
         if (changes) await this.bumpChanges(changes)
       },
     )
+  }
+
+  async saveMuseDecision(decision: MuseDecision): Promise<void> {
+    await this.db.transaction('rw', this.db.museDecisions, this.db.settings, async () => {
+      await this.db.museDecisions.put(decision)
+      await this.bumpChanges()
+    })
   }
 
   async reviewMuseItem(review: MuseItemReview): Promise<void> {
@@ -341,7 +369,7 @@ export class TrackerRepository {
     const muse = mode === 'merge' ? mergeMuseData(await this.getMuseData(), backupMuse) : backupMuse
     await this.db.transaction(
       'rw',
-      [this.db.entries, this.db.settings, this.db.gmailCandidates, this.db.processedGmailMessages, this.db.gmailSync, this.db.museItems, this.db.museSync],
+      [this.db.entries, this.db.settings, this.db.gmailCandidates, this.db.processedGmailMessages, this.db.gmailSync, this.db.museItems, this.db.museSync, this.db.museDecisions],
       async () => {
       await this.db.entries.clear()
       await this.db.gmailCandidates.clear()
@@ -349,6 +377,7 @@ export class TrackerRepository {
       await this.db.gmailSync.clear()
       await this.db.museItems.clear()
       await this.db.museSync.clear()
+      await this.db.museDecisions.clear()
       await this.db.entries.bulkPut(entries)
       await this.db.settings.put({ key: 'app', ...currentSettings })
       await this.db.gmailCandidates.bulkPut(gmail.candidates)
@@ -356,6 +385,7 @@ export class TrackerRepository {
       await this.db.gmailSync.put(gmail.syncState)
       await this.db.museItems.bulkPut(muse.items)
       await this.db.museSync.put(muse.syncState)
+      await this.db.museDecisions.bulkPut(muse.decisions ?? [])
       },
     )
   }
@@ -363,7 +393,7 @@ export class TrackerRepository {
   async reset(): Promise<void> {
     await this.db.transaction(
       'rw',
-      [this.db.entries, this.db.settings, this.db.gmailCandidates, this.db.processedGmailMessages, this.db.gmailSync, this.db.museItems, this.db.museSync],
+      [this.db.entries, this.db.settings, this.db.gmailCandidates, this.db.processedGmailMessages, this.db.gmailSync, this.db.museItems, this.db.museSync, this.db.museDecisions],
       async () => {
       await this.db.entries.clear()
       await this.db.settings.clear()
@@ -372,6 +402,7 @@ export class TrackerRepository {
       await this.db.gmailSync.clear()
       await this.db.museItems.clear()
       await this.db.museSync.clear()
+      await this.db.museDecisions.clear()
       },
     )
   }
@@ -404,7 +435,8 @@ function mergeMuseData(current: MuseData, backup: MuseData): MuseData {
   const syncState = !backupCursor || (currentCursor && compareStreamIds(currentCursor, backupCursor) >= 0)
     ? current.syncState
     : { ...current.syncState, cursor: backupCursor, lastPulledAt: backup.syncState.lastPulledAt }
-  return { items: sortMuseItems(items), syncState }
+  const decisions = [...new Map([...(backup.decisions ?? []), ...(current.decisions ?? [])].map((decision) => [decision.id, decision])).values()]
+  return { items: sortMuseItems(items), decisions, syncState }
 }
 
 function sortMuseItems(items: MuseItem[]): MuseItem[] {
